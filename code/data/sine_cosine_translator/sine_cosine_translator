@@ -2,7 +2,18 @@ import pandas as pd
 import numpy as np 
 
 class SineCosineTranslator:
-    # Define the mapping between sine to cosine using the same paramter t, amplitude and angle multiplier. 
+    """
+    Generation of sine and cosine function data based on specified parameters.
+    
+    Args:
+        amplitude (float): Amplitude of the sine and cosine functions.
+        angle_multiplier (float): Multiplier for the angle in the sine and cosine functions.
+        seed (int, optional): Random seed for reproducibility.
+        num_samples (int): Number of samples to generate.
+    
+    Returns:
+        pd.DataFrame: DataFrame containing 't', 'sine', and 'cosine' columns.
+    """ 
     def __init__(self, amplitude=1, angle_multiplier=1, seed=None, num_samples=1000):
         self.amplitude = amplitude
         self.angle_multiplier = angle_multiplier
@@ -17,7 +28,7 @@ class SineCosineTranslator:
     def cosine_function(self):
         return lambda t: self.amplitude * np.cos(self.angle_multiplier * t)
     
-    def generate_data(self):
+    def generate_data(self)-> pd.DataFrame:
         if self.seed is not None:
             np.random.seed(self.seed)
         
