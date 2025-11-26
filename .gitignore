@@ -1,0 +1,12 @@
+# Ignore venv and python 
+.venv/
+.python-version
+__pycache__/
+
+# Ignore IDE files
+.vscode/
+.idea/
+*.iml
+
+# UV lock 
+uv.lock

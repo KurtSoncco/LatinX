@@ -15,7 +15,7 @@ dependencies = [
   "numpy>=1.26",
   "pandas>=2.1",
   "scipy>=1.11",
-  "matplotlib>=3.8",    # pyplot
+  "matplotlib>=3.8",    # matplotlib
   "plotly>=5.16",      # interactive plots
   "seaborn>=0.13",
   "jupyterlab>=4.0",
@@ -26,30 +26,13 @@ dependencies = [
 
   # PyTorch (CPU by default). For GPU builds prefer following instructions on pytorch.org.
   "torch>=2.2",
-  "torchvision>=0.18",
-  "torchaudio>=2.2",
-
-  # Google cloud helpers (kept minimal; add more as needed)
-  "google-cloud-storage>=2.12",
-  "google-cloud-aiplatform>=1.30"
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=7.4",
-  "pytest-cov>=4.1",
-  "black>=24.3",
-  "isort>=5.13",
-  "pre-commit>=3.4",
-  "mypy>=1.6"
 ]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
-
-# NOTES:
-# - Astral 'uv' will read pyproject.toml to install declared dependencies.
-# - jaxlib (the compiled backend for JAX) often must be installed via a wheel that
-#   matches your CUDA/ROCm/CPU configuration. See CONTRIBUTING.md for recommended
-#   steps to install jaxlib after running `uv install`.
