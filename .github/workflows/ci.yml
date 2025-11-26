@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - setup/uv-ci
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Test (uv)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python (for runner tooling)
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install uv (standalone)
+        run: |
+          # Installer per Astral UV docs - standalone installer
+          # (the installer will place uv in the user's PATH; adjust PATH if needed)
+          curl -sSf https://get.astral.sh | sh
+          # If uv installs somewhere like $HOME/.uv/bin, make sure it's on PATH
+          export PATH="$HOME/.uv/bin:$PATH" || true
+          uv --version
+
+      - name: Install system build deps (optional)
+        run: sudo apt-get update && sudo apt-get install -y build-essential || true
+
+      - name: Install project dependencies with uv
+        run: |
+          export PATH="$HOME/.uv/bin:$PATH" || true
+          uv install
+
+      - name: Run tests
+        run: |
+          export PATH="$HOME/.uv/bin:$PATH" || true
+          uv run pytest -q
+
+      - name: Lint / format checks
+        run: |
+          export PATH="$HOME/.uv/bin:$PATH" || true
+          # Check formatting only (fail CI if not formatted)
+          uv run black --check .
+          uv run isort --check-only .
