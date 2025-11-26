@@ -1,5 +1,13 @@
 # LatinX
 
+[![CI](https://github.com/KurtSoncco/LatinX/actions/workflows/ci.yml/badge.svg)](https://github.com/KurtSoncco/LatinX/actions/workflows/ci.yml)
+[![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![JAX](https://img.shields.io/badge/JAX-enabled-orange.svg)](https://github.com/google/jax)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.2+-red.svg)](https://pytorch.org/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+
 **LatinX** — Collaborative research & ML experiments on Bayesian Last Layer
 
 A modern Python project for machine learning research focused on Bayesian methods, built with JAX-first approach and PyTorch support.
