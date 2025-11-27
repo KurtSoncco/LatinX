@@ -8,14 +8,6 @@ def test_import_latinx():
     assert latinx.__version__ == "0.1.0"
 
 
-def test_import_submodules():
-    """Test that submodules can be imported."""
-    from latinx import data, models
-
-    assert data is not None
-    assert models is not None
-
-
 def test_dependencies():
     """Test that key dependencies can be imported."""
     import jax

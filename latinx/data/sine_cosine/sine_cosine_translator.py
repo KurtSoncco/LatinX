@@ -16,7 +16,13 @@ class SineCosineTranslator:
         pd.DataFrame: DataFrame containing 't', 'sine', and 'cosine' columns.
     """
 
-    def __init__(self, amplitude=1, angle_multiplier=1, seed=None, num_samples=1000):
+    def __init__(
+        self,
+        amplitude: float = 1.0,
+        angle_multiplier: float = 1.0,
+        seed: int | None = None,
+        num_samples: int = 1000,
+    ):
         self.amplitude = amplitude
         self.angle_multiplier = angle_multiplier
         self.seed = seed
@@ -30,7 +36,7 @@ class SineCosineTranslator:
     def cosine_function(self):
         return lambda t: self.amplitude * np.cos(self.angle_multiplier * t)
 
-    def generate_data(self) -> pd.DataFrame:
+    def generate(self) -> pd.DataFrame:
         if self.seed is not None:
             np.random.seed(self.seed)
 

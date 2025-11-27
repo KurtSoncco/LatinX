@@ -3,14 +3,14 @@
 import numpy as np
 
 
-def test_placeholder():
-    """Placeholder test for data module."""
-    # This is a placeholder - add real tests as you implement data utilities
-    assert True
+def test_generate_sine_cosine_data():
+    """Test sine and cosine data generation."""
+    from latinx.data.sine_cosine import SineCosineTranslator
 
+    translator = SineCosineTranslator(amplitude=2, angle_multiplier=np.pi, seed=42, num_samples=10)
+    data = translator.generate()
 
-def test_numpy_basic():
-    """Test basic numpy functionality."""
-    arr = np.array([1, 2, 3, 4, 5])
-    assert arr.mean() == 3.0
-    assert len(arr) == 5
+    assert len(data) == 10
+    assert ["t", "sine", "cosine"] == list(data.columns)
+    assert np.isclose(np.max(data["sine"]), 1.969615506024414, atol=1e-5)
+    assert np.isclose(np.min(data["cosine"]), -2.0, atol=1e-5)
