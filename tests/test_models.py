@@ -1,7 +1,5 @@
 """Tests for model implementations."""
 
-import pytest
-
 
 def test_placeholder():
     """Placeholder test for models module."""

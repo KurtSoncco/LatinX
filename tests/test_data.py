@@ -1,6 +1,5 @@
 """Tests for data processing utilities."""
 
-import pytest
 import numpy as np
 
 

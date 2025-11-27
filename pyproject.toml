@@ -55,10 +55,10 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["code"]
+packages = ["latinx"]
 
 [tool.setuptools.package-dir]
-code = "code"
+latinx = "latinx"
 
 # Black configuration
 [tool.black]
@@ -105,7 +105,7 @@ addopts = [
 
 # coverage configuration
 [tool.coverage.run]
-source = ["code"]
+source = ["latinx"]
 omit = ["tests/*", "**/__init__.py"]
 
 [tool.coverage.report]

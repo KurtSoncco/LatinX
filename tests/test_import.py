@@ -1,18 +1,16 @@
 """Basic import tests for LatinX package."""
 
-import pytest
 
+def test_import_latinx():
+    """Test that the main latinx package can be imported."""
+    import latinx
 
-def test_import_code():
-    """Test that the main code package can be imported."""
-    import code
-
-    assert code.__version__ == "0.1.0"
+    assert latinx.__version__ == "0.1.0"
 
 
 def test_import_submodules():
     """Test that submodules can be imported."""
-    from code import data, models
+    from latinx import data, models
 
     assert data is not None
     assert models is not None
