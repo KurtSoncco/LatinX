@@ -53,6 +53,9 @@ class KalmanFilterHead:
         self.mu_minus = None
         self.P_minus = None
         self.H = None
+        self.K = None  # Kalman gain
+        self.innovation = None  # Innovation (prediction error)
+        self.innovation_variance = None  # Innovation covariance (S)
 
     def predict(self, phi_x: Array) -> float:
         """
@@ -102,6 +105,11 @@ class KalmanFilterHead:
 
         # Kalman Gain (K) - use solve for better numerical stability
         K = self.P_minus @ self.H.T / S  # More stable than matrix inverse for 1D case
+
+        # Store metrics-related values
+        self.innovation = error
+        self.innovation_variance = S
+        self.K = K
 
         # Update State (Weights)
         self.mu = self.mu_minus + K * error

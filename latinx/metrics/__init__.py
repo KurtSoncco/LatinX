@@ -1,6 +1,6 @@
 """Metrics module for evaluating Kalman filters and other models."""
 
-from latinx.metrics.kalman_filter import (
+from latinx.metrics.metrics_kalman_filter import (
     absolute_error,
     compute_all_metrics,
     compute_metrics_over_time,
