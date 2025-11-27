@@ -201,11 +201,7 @@ def mae(y_true: float | Array | list[float], y_pred: float | Array | list[float]
     return float(jnp.mean(jnp.abs(y_true_arr - y_pred_arr)))
 
 
-def log_likelihood(
-    bll: BayesianLastLayer,
-    x: jnp.ndarray,
-    y_true: jnp.ndarray
-) -> float:
+def log_likelihood(bll: BayesianLastLayer, x: jnp.ndarray, y_true: jnp.ndarray) -> float:
     """
     Compute the average log-likelihood of the data under the predictive distribution.
 
@@ -226,17 +222,14 @@ def log_likelihood(
     y_pred, y_std = bll.predict(x, return_std=True)
 
     # Gaussian log-likelihood: -0.5 * log(2*pi*var) - 0.5 * (y - mu)^2 / var
-    variance = y_std ** 2
+    variance = y_std**2
     log_lik = -0.5 * jnp.log(2 * jnp.pi * variance) - 0.5 * (y_true - y_pred) ** 2 / variance
 
     return float(jnp.mean(log_lik))
 
 
 def compute_all_metrics(
-    bll: BayesianLastLayer,
-    x: jnp.ndarray,
-    y_true: jnp.ndarray,
-    y_pred: jnp.ndarray | None = None
+    bll: BayesianLastLayer, x: jnp.ndarray, y_true: jnp.ndarray, y_pred: jnp.ndarray | None = None
 ) -> dict[str, float]:
     """
     Compute all available metrics for a Bayesian Last Layer model.

@@ -23,8 +23,8 @@ class SineCosineTranslator:
         angle_multiplier: float = 1.0,
         seed: int | None = None,
         num_samples: int = 1000,
-        noise_mean:int = 0,
-        noise_std:float = 0.1,
+        noise_mean: int = 0,
+        noise_std: float = 0.1,
     ):
         self.amplitude = amplitude
         self.angle_multiplier = angle_multiplier
@@ -47,8 +47,18 @@ class SineCosineTranslator:
 
         t_values = np.linspace(0, 2 * np.pi, self.num_samples)
         sine_values = self.sine_function(t_values)
-        cosine_values = self.cosine_function(t_values) + np.random.normal(self.noise_mean,  self.noise_std, self.num_samples)
+        cosine_values = self.cosine_function(t_values) + np.random.normal(
+            self.noise_mean, self.noise_std, self.num_samples
+        )
 
-        data = pd.DataFrame({"t": t_values, "sine": sine_values, "cosine": cosine_values, "x1":sine_values, "y1": cosine_values})
+        data = pd.DataFrame(
+            {
+                "t": t_values,
+                "sine": sine_values,
+                "cosine": cosine_values,
+                "x1": sine_values,
+                "y1": cosine_values,
+            }
+        )
 
         return data

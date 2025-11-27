@@ -94,7 +94,9 @@ class BayesianLastLayer:
         yhat = self.model.apply(params, x).squeeze()
         return jnp.power(y.squeeze() - yhat, 2).mean()
 
-    def _step(self, state: TrainState, _: Any, x: jnp.ndarray, y: jnp.ndarray) -> Tuple[TrainState, float]:
+    def _step(
+        self, state: TrainState, _: Any, x: jnp.ndarray, y: jnp.ndarray
+    ) -> Tuple[TrainState, float]:
         """Single training step."""
         loss, grads = jax.value_and_grad(lambda p: self._lossfn(p, x, y))(state.params)
         state = state.apply_gradients(grads=grads)
@@ -115,9 +117,7 @@ class BayesianLastLayer:
         params_init = self.model.init(key, x)
 
         state = TrainState.create(
-            params=params_init,
-            apply_fn=self.model.apply,
-            tx=optax.adam(self.learning_rate)
+            params=params_init, apply_fn=self.model.apply, tx=optax.adam(self.learning_rate)
         )
 
         # Training loop
@@ -145,7 +145,7 @@ class BayesianLastLayer:
 
         M = phi_x.shape[1]
         IM = jnp.eye(M)
-        self.beta = 1 / self.sigma ** 2  # observation precision
+        self.beta = 1 / self.sigma**2  # observation precision
 
         # Compute posterior parameters
         self.posterior_precision = self.alpha * IM + self.beta * phi_x.T @ phi_x
@@ -183,7 +183,9 @@ class BayesianLastLayer:
 
         return loss_history
 
-    def predict(self, x: jnp.ndarray, return_std: bool = False) -> jnp.ndarray | Tuple[jnp.ndarray, jnp.ndarray]:
+    def predict(
+        self, x: jnp.ndarray, return_std: bool = False
+    ) -> jnp.ndarray | Tuple[jnp.ndarray, jnp.ndarray]:
         """
         Make predictions using the Bayesian last layer.
 
@@ -207,10 +209,7 @@ class BayesianLastLayer:
         if return_std:
             # Compute predictive variance
             pred_var = 1 / self.beta + jnp.einsum(
-                "si,ij,sj->s",
-                phi_x,
-                jnp.linalg.inv(self.posterior_precision),
-                phi_x
+                "si,ij,sj->s", phi_x, jnp.linalg.inv(self.posterior_precision), phi_x
             )
             pred_std = jnp.sqrt(pred_var)
             return pred_mean, pred_std
