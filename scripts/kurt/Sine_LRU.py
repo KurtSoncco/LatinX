@@ -12,9 +12,9 @@ from latinx.data.sine_cosine import SineCosineTranslator
 
 # Task configuration: cleaner and more maintainable
 TASK_CONFIGS: dict[int, dict[str, float]] = {
-    0: {"amplitude": 1.0, "angle_multiplier": 2 * np.pi},
-    1: {"amplitude": 0.5, "angle_multiplier": 4 * np.pi},
-    2: {"amplitude": 1.5, "angle_multiplier": 1 * np.pi},
+    0: {"amplitude": 1.0, "angle_multiplier": 10},
+    1: {"amplitude": 0.5, "angle_multiplier": 10},
+    2: {"amplitude": -1.5, "angle_multiplier": 10},
 }
 
 
@@ -56,38 +56,24 @@ class SimpleRNN(nn.Module):
         super().__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
-
-        # A standard RNN layer
         self.rnn = nn.RNN(input_size, hidden_size, batch_first=True, nonlinearity="tanh")
-        # A temporary linear head used only for pre-training
-        self.temp_head = nn.Linear(hidden_size, 1)
 
     def forward(
         self, x: torch.Tensor, h: torch.Tensor | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass through the RNN.
+        Forward pass returning backbone features only (no prediction head).
 
         Args:
-            x: Input tensor of shape (batch, seq_len, input_size)
-            h: Optional initial hidden state of shape (1, batch, hidden_size)
+            x: (batch, seq_len, input_size)
+            h: Optional initial hidden state (1, batch, hidden_size)
 
         Returns:
-            Tuple of (pred, last_step_features, h_n) where:
-                pred: Predictions of shape (batch, 1)
-                last_step_features: Features from last timestep (batch, hidden_size)
-                h_n: Final hidden state (1, batch, hidden_size)
+            Tuple (last_step_features, h_n)
         """
-        # x shape: (batch, seq_len, input_size)
         out, h_n = self.rnn(x, h)
-
-        # We extract features from the last time step of the sequence
         last_step_features = out[:, -1, :]
-
-        # Prediction (used during pre-training only)
-        pred = self.temp_head(last_step_features)
-
-        return pred, last_step_features, h_n
+        return last_step_features, h_n
 
 
 class KalmanFilterHead:
@@ -207,7 +193,9 @@ if __name__ == "__main__":
     SEQ_LEN = 10
     HIDDEN_SIZE = 32
     rnn_model = SimpleRNN(input_size=1, hidden_size=HIDDEN_SIZE)
-    optimizer = optim.Adam(rnn_model.parameters(), lr=0.01)
+    pretrain_head = nn.Linear(HIDDEN_SIZE, 1)  # external head only used here
+    params = list(rnn_model.parameters()) + list(pretrain_head.parameters())
+    optimizer = optim.Adam(params, lr=0.01)
     criterion = nn.MSELoss()
 
     # Train Loop (Offline)
@@ -232,7 +220,8 @@ if __name__ == "__main__":
 
         # Standard PyTorch training step
         optimizer.zero_grad()
-        preds, _, _ = rnn_model(inputs)
+        features, _ = rnn_model(inputs)
+        preds = pretrain_head(features)
         loss = criterion(preds, targets)
         loss.backward()
         optimizer.step()
@@ -244,6 +233,8 @@ if __name__ == "__main__":
     # Freeze the backbone!
     for param in rnn_model.parameters():
         param.requires_grad = False
+    # Discard the pretrain head explicitly
+    del pretrain_head
 
     # ==========================================
     # 5. PHASE 2: ONLINE ADAPTATION
@@ -287,14 +278,27 @@ if __name__ == "__main__":
         # --- Forward Pass ---
         # 1. Backbone: Get Features from Frozen RNN
         input_tensor = torch.tensor(np.array(input_buffer), dtype=torch.float32).view(1, SEQ_LEN, 1)
-        _, features_tensor, _ = rnn_model(input_tensor)
+        features_tensor, _ = rnn_model(input_tensor)
 
         # Convert to numpy for the Kalman Filter
         phi = features_tensor.detach().numpy().T  # Shape (M, 1)
 
-        # 2. Head: Bayesian Prediction & Update
+        # 2. Head: Bayesian Prediction & (conditional) Update
+        # Train (update) ONLY during Task 0; Tasks 1 & 2 are prediction-only.
         pred_val = kf.predict(phi)
-        uncertainty_S, _ = kf.update(y_t, pred_val)
+        if curr_task == 0:
+            # Update parameters (training phase)
+            uncertainty_S, error = kf.update(y_t, pred_val)
+        else:
+            # Prediction only (no parameter update). Use predicted covariance (P_minus) for uncertainty.
+            # Ensure predict() populated H and P_minus.
+            if kf.H is not None and kf.P_minus is not None:
+                S_mat = kf.H @ kf.P_minus @ kf.H.T + kf.R  # shape (1,1)
+                uncertainty_S = float(S_mat.item())
+            else:
+                # Fallback if internal state not set (should not happen if predict() succeeded)
+                uncertainty_S = float(np.nan)
+            error = y_t - pred_val
 
         # --- Store Results ---
         history["y_true"].append(y_t)

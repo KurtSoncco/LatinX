@@ -40,7 +40,7 @@ class SineCosineTranslator:
         if self.seed is not None:
             np.random.seed(self.seed)
 
-        t_values = np.linspace(0, 1, self.num_samples)
+        t_values = np.linspace(0, 2 * np.pi, self.num_samples)
         sine_values = self.sine_function(t_values)
         cosine_values = self.cosine_function(t_values)
 

@@ -12,5 +12,5 @@ def test_generate_sine_cosine_data():
 
     assert len(data) == 10
     assert ["t", "sine", "cosine"] == list(data.columns)
-    assert np.isclose(np.max(data["sine"]), 1.969615506024414, atol=1e-5)
-    assert np.isclose(np.min(data["cosine"]), -2.0, atol=1e-5)
+    assert np.isclose(np.max(data["sine"]), 1.6249060130820974, atol=1e-5)
+    assert np.isclose(np.min(data["cosine"]), -1.8751223859445167, atol=1e-5)
