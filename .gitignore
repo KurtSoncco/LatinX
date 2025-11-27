@@ -1,7 +1,11 @@
-# Ignore venv and python 
+# Ignore venv and python
 .venv/
 .python-version
 __pycache__/
+*.egg-info/
+dist/
+build/
+*.egg
 
 # Ignore IDE files
 .vscode/

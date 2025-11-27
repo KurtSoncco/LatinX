@@ -11,6 +11,6 @@ def test_generate_sine_cosine_data():
     data = translator.generate()
 
     assert len(data) == 10
-    assert ["t", "sine", "cosine"] == list(data.columns)
+    assert ["t", "sine", "cosine", "x1", "y1"] == list(data.columns)
     assert np.isclose(np.max(data["sine"]), 1.6249060130820974, atol=1e-5)
     assert np.isclose(np.min(data["cosine"]), -1.7983789130292258, atol=1e-5)
