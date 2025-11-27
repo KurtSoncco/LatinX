@@ -30,6 +30,8 @@ dependencies = [
   # JAX (Python package). jaxlib (native backend) often must be installed
   # specially for GPUs/TPUs; see README for GPU/TPU install instructions.
   "jax>=0.4,<1.0",
+  "flax>=0.8,<1.0",
+  "optax>=0.1,<1.0",
   # PyTorch (CPU by default). For GPU builds prefer following instructions on pytorch.org.
   "torch>=2.2,<3.0",
 ]
