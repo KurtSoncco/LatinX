@@ -19,6 +19,7 @@ from latinx.plotting import (
     plot_bessel_ripple_3d,
     plot_bessel_ripple_contour,
     plot_bessel_ripple_with_uncertainty,
+    plot_bll_vs_full_nn
 )
 
 
@@ -123,8 +124,8 @@ def main():
 
     bll = BayesianLastLayer(
         hidden_dims=(30, 30, 20),  # Deeper network for complex ripples
-        sigma=0.001,
-        alpha=0.1,  # Less regularization for flexible fit
+        sigma=0.01,
+        alpha=0.01,  # Less regularization for flexible fit
         learning_rate=1e-3,
         n_steps=3000,
         seed=42,
@@ -170,6 +171,21 @@ def main():
         title="Bessel Ripple: BLL Predictions and Uncertainty",
         cmap="plasma",
     )
+
+    print("\n11. Creating BLL vs Full NN comparison plot...")
+    y_pred_nn = bll.predict_full_nn(X)
+    rmse_full_nn = np.sqrt((np.mean(y_target- y_pred_nn)**2))
+
+    fig_comparison_bessel = plot_bll_vs_full_nn(
+        data=data,
+        bll_predictions=np.array(y_pred),
+        nn_predictions=np.array(y_pred_nn),
+        figsize=(18, 5),
+        title="Bessel Ripple: Ground Truth vs BLL vs Full NN",
+        cmap="plasma",
+    )
+
+    print(f"RMSE BLL: {rmse}, RMSE Normal NN {rmse_full_nn}")
 
     print("\n" + "=" * 60)
     print("All visualizations created!")

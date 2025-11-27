@@ -11,7 +11,6 @@ import pandas as pd
 from mpl_toolkits.mplot3d import Axes3D
 from typing import Tuple, Optional
 
-
 def plot_bessel_ripple(
     data: pd.DataFrame,
     column: str = "z",

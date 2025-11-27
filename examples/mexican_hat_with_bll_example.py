@@ -19,6 +19,7 @@ from latinx.plotting import (
     plot_mexican_hat_3d,
     plot_mexican_hat_contour,
     plot_mexican_hat_comparison,
+    plot_bll_vs_full_nn
 )
 
 
@@ -104,8 +105,8 @@ def main():
 
     bll = BayesianLastLayer(
         hidden_dims=(20, 20),
-        sigma=0.1,
-        alpha=0.01,
+        sigma=0.00001,
+        alpha=0.00000001,
         learning_rate=1e-3,
         n_steps=2000,
         seed=42,
@@ -192,6 +193,23 @@ def main():
         title="Prediction Uncertainty on Extended Domain",
         cmap="hot",
     )
+
+    print("\n11. Creating BLL vs Full NN comparison plot...")
+    y_pred_nn = bll.predict_full_nn(X)
+    rmse_full_nn = np.sqrt((np.mean(y_target- y_pred_nn)**2))
+
+
+    fig_comparison_bessel = plot_bll_vs_full_nn(
+        data=data,
+        bll_predictions=np.array(y_pred),
+        nn_predictions=np.array(y_pred_nn),
+        figsize=(18, 5),
+        title="Bessel Ripple: Ground Truth vs BLL vs Full NN",
+        cmap="plasma",
+    )
+
+    print(f"RMSE BLL: {rmse}, RMSE Normal NN {rmse_full_nn}")
+
 
     print("\n" + "=" * 60)
     print("All visualizations created!")
