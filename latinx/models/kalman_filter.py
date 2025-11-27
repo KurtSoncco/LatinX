@@ -111,15 +111,3 @@ class KalmanFilterHead:
         self.P = I_KH @ self.P_minus @ I_KH.T + K @ self.R @ K.T
 
         return float(S.item()), float(error)
-
-
-if __name__ == "__main__":
-    # Test the Kalman Filter Head
-    kf = KalmanFilterHead(feature_dim=10, rho=0.99, Q_std=0.01, R_std=0.1)
-    phi_x = jnp.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0])
-    y_true = 10.0
-    y_pred_val = kf.predict(phi_x)
-    print(f"Predicted value: {y_pred_val}")
-    innovation_covariance, prediction_error = kf.update(y_true, y_pred_val)
-    print(f"Innovation covariance: {innovation_covariance}")
-    print(f"Prediction error: {prediction_error}")
