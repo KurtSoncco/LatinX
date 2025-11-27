@@ -5,6 +5,7 @@ import pandas as pd
 class SineCosineTranslator:
     """
     Generation of sine and cosine function data based on specified parameters.
+    The output present some noise.
 
     Args:
         amplitude (float): Amplitude of the sine and cosine functions.
@@ -42,7 +43,7 @@ class SineCosineTranslator:
 
         t_values = np.linspace(0, 2 * np.pi, self.num_samples)
         sine_values = self.sine_function(t_values)
-        cosine_values = self.cosine_function(t_values)
+        cosine_values = self.cosine_function(t_values) + np.random.normal(0, 0.1, self.num_samples)
 
         data = pd.DataFrame({"t": t_values, "sine": sine_values, "cosine": cosine_values})
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -9,6 +10,17 @@ import torch.nn as nn
 import torch.optim as optim
 
 from latinx.data.sine_cosine import SineCosineTranslator
+from latinx.metrics.metrics_kalman_filter import (
+    absolute_error,
+    innovation,
+    innovation_variance,
+    kalman_gain_norm,
+    normalized_innovation_squared,
+    trace_covariance,
+    uncertainty_3sigma,
+    weight_norm,
+)
+from latinx.models.kalman_filter import KalmanFilterHead
 
 # Task configuration: cleaner and more maintainable
 TASK_CONFIGS: dict[int, dict[str, float]] = {
@@ -74,113 +86,6 @@ class SimpleRNN(nn.Module):
         out, h_n = self.rnn(x, h)
         last_step_features = out[:, -1, :]
         return last_step_features, h_n
-
-
-class KalmanFilterHead:
-    """
-    Kalman Filter-based adaptive linear regression head.
-
-    Implements Bayesian linear regression with a forgetting factor to enable
-    adaptation to non-stationary environments. Uses the Kalman filter update
-    equations for online learning.
-
-    Args:
-        feature_dim: Dimension of input features
-        rho: Forgetting factor (0 < rho <= 1). Values < 1 allow adaptation
-        Q_std: Standard deviation of process noise
-        R_std: Standard deviation of measurement noise
-        initial_uncertainty: Initial covariance scale for parameter uncertainty
-    """
-
-    def __init__(
-        self,
-        feature_dim: int,
-        rho: float = 0.99,
-        Q_std: float = 0.01,
-        R_std: float = 0.1,
-        initial_uncertainty: float = 1.0,
-    ):
-        if not 0 < rho <= 1:
-            raise ValueError(f"rho must be in (0, 1], got {rho}")
-        if feature_dim <= 0:
-            raise ValueError(f"feature_dim must be positive, got {feature_dim}")
-        if Q_std < 0 or R_std <= 0:
-            raise ValueError("Q_std and R_std must be non-negative and positive respectively")
-
-        self.M = feature_dim
-        self.rho = rho
-
-        # Initial State: Weights (mu) and Uncertainty (P)
-        self.mu = np.zeros((self.M, 1), dtype=np.float64)
-        self.P = np.eye(self.M, dtype=np.float64) * initial_uncertainty
-
-        # Noise Covariances
-        self.Q = np.eye(self.M, dtype=np.float64) * (Q_std**2)  # Process noise
-        self.R = np.array([[R_std**2]], dtype=np.float64)  # Measurement noise
-        self.A = np.eye(self.M, dtype=np.float64) * rho  # Forgetting factor
-
-        # For storing intermediate values
-        self.mu_minus = None
-        self.P_minus = None
-        self.H = None
-
-    def predict(self, phi_x: np.ndarray) -> float:
-        """
-        Predict the output given input features using current parameter estimates.
-
-        Args:
-            phi_x: Feature vector of shape (M, 1) or (M,)
-
-        Returns:
-            Predicted scalar value
-        """
-        # Ensure phi_x is 2D column vector
-        if phi_x.ndim == 1:
-            phi_x = phi_x.reshape(-1, 1)
-
-        if phi_x.shape[0] != self.M:
-            raise ValueError(f"Feature dimension mismatch: expected {self.M}, got {phi_x.shape[0]}")
-
-        # --- 1. Time Update (Predict) ---
-        self.mu_minus = self.A @ self.mu
-        self.P_minus = self.A @ self.P @ self.A.T + self.Q
-
-        # --- 2. Measurement Prediction ---
-        self.H = phi_x.T
-        y_pred = self.H @ self.mu_minus
-        return float(y_pred.item())
-
-    def update(self, y_true: float, y_pred_val: float) -> tuple[float, float]:
-        """
-        Update parameter estimates given observed true value.
-
-        Args:
-            y_true: True observed value
-            y_pred_val: Previously predicted value from predict()
-
-        Returns:
-            Tuple of (innovation_covariance, prediction_error)
-        """
-        if self.mu_minus is None or self.P_minus is None or self.H is None:
-            raise RuntimeError("Must call predict() before update()")
-
-        # --- 3. Measurement Update (Correct) ---
-        error = y_true - y_pred_val
-
-        # Innovation Covariance (S)
-        S = self.H @ self.P_minus @ self.H.T + self.R
-
-        # Kalman Gain (K) - use solve for better numerical stability
-        K = self.P_minus @ self.H.T / S  # More stable than matrix inverse for 1D case
-
-        # Update State (Weights)
-        self.mu = self.mu_minus + K * error
-
-        # Update Uncertainty (Covariance) - Joseph form for numerical stability
-        I_KH = np.eye(self.M, dtype=np.float64) - K @ self.H
-        self.P = I_KH @ self.P_minus @ I_KH.T + K @ self.R @ K.T
-
-        return float(S.item()), float(error)
 
 
 if __name__ == "__main__":
@@ -254,7 +159,19 @@ if __name__ == "__main__":
     input_buffer = deque(np.zeros(SEQ_LEN), maxlen=SEQ_LEN)
 
     # Storage for plotting
-    history = {"y_true": [], "y_pred": [], "sigma": [], "weights_norm": []}
+    history = {
+        "y_true": [],
+        "y_pred": [],
+        "sigma": [],
+        "weights_norm": [],
+        "trace_covariance": [],
+        "nis": [],
+        "absolute_error": [],
+        "uncertainty_3sigma": [],
+        "kalman_gain_norm": [],
+        "innovation": [],
+        "innovation_variance": [],
+    }
 
     curr_task = 0
 
@@ -280,8 +197,8 @@ if __name__ == "__main__":
         input_tensor = torch.tensor(np.array(input_buffer), dtype=torch.float32).view(1, SEQ_LEN, 1)
         features_tensor, _ = rnn_model(input_tensor)
 
-        # Convert to numpy for the Kalman Filter
-        phi = features_tensor.detach().numpy().T  # Shape (M, 1)
+        # Convert to JAX array for the Kalman Filter
+        phi = jnp.array(features_tensor.detach().numpy().T)  # Shape (M, 1)
 
         # 2. Head: Bayesian Prediction & (conditional) Update
         # Train (update) ONLY during Task 0; Tasks 1 & 2 are prediction-only.
@@ -297,14 +214,21 @@ if __name__ == "__main__":
                 uncertainty_S = float(S_mat.item())
             else:
                 # Fallback if internal state not set (should not happen if predict() succeeded)
-                uncertainty_S = float(np.nan)
+                uncertainty_S = float(jnp.nan)
             error = y_t - pred_val
 
         # --- Store Results ---
         history["y_true"].append(y_t)
         history["y_pred"].append(pred_val)
         history["sigma"].append(np.sqrt(uncertainty_S))
-        history["weights_norm"].append(np.linalg.norm(kf.mu))
+        history["weights_norm"].append(weight_norm(kf))
+        history["trace_covariance"].append(trace_covariance(kf))
+        history["nis"].append(normalized_innovation_squared(kf))
+        history["absolute_error"].append(absolute_error(y_t, pred_val))
+        history["uncertainty_3sigma"].append(uncertainty_3sigma(kf))
+        history["kalman_gain_norm"].append(kalman_gain_norm(kf))
+        history["innovation"].append(innovation(kf))
+        history["innovation_variance"].append(innovation_variance(kf))
 
     # ==========================================
     # 6. PLOTTING
@@ -319,7 +243,7 @@ if __name__ == "__main__":
 
     # Plot 1: Trajectory and Adaptation
     plt.subplot(3, 1, 1)
-    plt.title("RNN Backbone + Bayesian Head: Adapting to Task Shifts")
+    plt.title("RNN Backbone + JAX Kalman Filter Head: Adapting to Task Shifts")
     plt.plot(time_axis, y_true, "k-", label="Ground Truth", alpha=0.6)
     plt.plot(time_axis, y_pred, "r--", label="KF Prediction", linewidth=1.5)
 
@@ -327,9 +251,17 @@ if __name__ == "__main__":
     for pt in SWITCH_POINTS:
         plt.axvline(pt, color="blue", linestyle=":", linewidth=2)
 
-    plt.text(50, 1.5, "Task 1: Cosine\n(Known Task)", fontsize=10, color="blue")
-    plt.text(250, 2.5, "Task 2: 2x Cosine\n(Amplitude Drift)", fontsize=10, color="blue")
-    plt.text(450, 1.5, "Task 3: -Cosine\n(Inversion Drift)", fontsize=10, color="blue")
+    plt.text(50, 1.5, "Task 0: Cosine\n(amplitude=1.0, Training)", fontsize=10, color="blue")
+    plt.text(
+        250, 2.5, "Task 1: 0.5x Cosine\n(amplitude=0.5, Prediction Only)", fontsize=10, color="blue"
+    )
+    plt.text(
+        450,
+        1.5,
+        "Task 2: -1.5x Cosine\n(amplitude=-1.5, Prediction Only)",
+        fontsize=10,
+        color="blue",
+    )
     plt.legend(loc="upper right")
     plt.grid(True, alpha=0.3)
 
@@ -360,3 +292,88 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig(save_path, dpi=300)
     plt.show()
+
+    # ==========================================
+    # 7. METRICS PLOTTING
+    # ==========================================
+    print("Generating metrics figure...")
+    metrics_save_path = "results/figures/Figure_Metrics.png"
+    time_axis = np.arange(SIM_STEPS)
+
+    # Create a comprehensive metrics figure
+    fig, axes = plt.subplots(4, 2, figsize=(16, 16))
+    fig.suptitle("Kalman Filter Metrics Over Time", fontsize=16, fontweight="bold")
+
+    # Plot 1: Trace of Covariance Matrix
+    axes[0, 0].plot(time_axis, history["trace_covariance"], "b-", linewidth=1.5)
+    axes[0, 0].set_title("Trace of Covariance Matrix P")
+    axes[0, 0].set_ylabel("Trace(P)")
+    axes[0, 0].grid(True, alpha=0.3)
+    for pt in SWITCH_POINTS:
+        axes[0, 0].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
+
+    # Plot 2: Normalized Innovation Squared (NIS)
+    axes[0, 1].plot(time_axis, history["nis"], "g-", linewidth=1.5, label="NIS")
+    axes[0, 1].axhline(1.0, color="r", linestyle="--", linewidth=1, label="Target (NIS=1)")
+    axes[0, 1].set_title("Normalized Innovation Squared (NIS)")
+    axes[0, 1].set_ylabel("NIS")
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+    for pt in SWITCH_POINTS:
+        axes[0, 1].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
+
+    # Plot 3: Absolute Error
+    axes[1, 0].plot(time_axis, history["absolute_error"], "orange", linewidth=1.5)
+    axes[1, 0].set_title("Absolute Error")
+    axes[1, 0].set_ylabel("|y_true - y_pred|")
+    axes[1, 0].grid(True, alpha=0.3)
+    for pt in SWITCH_POINTS:
+        axes[1, 0].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
+
+    # Plot 4: Uncertainty (3 Sigma)
+    axes[1, 1].plot(time_axis, history["uncertainty_3sigma"], "purple", linewidth=1.5)
+    axes[1, 1].set_title("Uncertainty (3-Sigma Confidence Interval)")
+    axes[1, 1].set_ylabel("3σ")
+    axes[1, 1].grid(True, alpha=0.3)
+    for pt in SWITCH_POINTS:
+        axes[1, 1].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
+
+    # Plot 5: Weight Norm
+    axes[2, 0].plot(time_axis, history["weights_norm"], "brown", linewidth=1.5)
+    axes[2, 0].set_title("Norm of Weight Vector")
+    axes[2, 0].set_ylabel("||μ||")
+    axes[2, 0].grid(True, alpha=0.3)
+    for pt in SWITCH_POINTS:
+        axes[2, 0].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
+
+    # Plot 6: Kalman Gain Norm
+    axes[2, 1].plot(time_axis, history["kalman_gain_norm"], "teal", linewidth=1.5)
+    axes[2, 1].set_title("Norm of Kalman Gain")
+    axes[2, 1].set_ylabel("||K||")
+    axes[2, 1].grid(True, alpha=0.3)
+    for pt in SWITCH_POINTS:
+        axes[2, 1].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
+
+    # Plot 7: Innovation
+    axes[3, 0].plot(time_axis, history["innovation"], "magenta", linewidth=1.5)
+    axes[3, 0].axhline(0.0, color="k", linestyle="--", linewidth=0.5, alpha=0.5)
+    axes[3, 0].set_title("Innovation (Prediction Error)")
+    axes[3, 0].set_xlabel("Time Step")
+    axes[3, 0].set_ylabel("Innovation")
+    axes[3, 0].grid(True, alpha=0.3)
+    for pt in SWITCH_POINTS:
+        axes[3, 0].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
+
+    # Plot 8: Innovation Variance
+    axes[3, 1].plot(time_axis, history["innovation_variance"], "darkgreen", linewidth=1.5)
+    axes[3, 1].set_title("Innovation Variance (S)")
+    axes[3, 1].set_xlabel("Time Step")
+    axes[3, 1].set_ylabel("Variance")
+    axes[3, 1].grid(True, alpha=0.3)
+    for pt in SWITCH_POINTS:
+        axes[3, 1].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
+
+    plt.tight_layout()
+    plt.savefig(metrics_save_path, dpi=300)
+    plt.show()
+    print(f"Metrics figure saved to {metrics_save_path}")
