@@ -88,6 +88,7 @@ def run_kf_with_updates(
         "innovation": [],
         "innovation_sq": [],
         "trace_P": [],
+        "weight_norm": [],
     }
 
     # Initialize buffer
@@ -129,6 +130,7 @@ def run_kf_with_updates(
         results["innovation"].append(innovation(kf_model))
         results["innovation_sq"].append(innovation(kf_model) ** 2)
         results["trace_P"].append(trace_covariance(kf_model))
+        results["weight_norm"].append(float(jnp.linalg.norm(kf_model.mu)))
 
         # Update buffer for next iteration
         input_buffer.append(z_noisy_t)
@@ -171,6 +173,7 @@ def run_kf_prediction_only(
         "innovation": [],
         "innovation_sq": [],
         "trace_P": [],
+        "weight_norm": [],
     }
 
     # Initialize buffer
@@ -220,6 +223,7 @@ def run_kf_prediction_only(
         results["innovation"].append(error)
         results["innovation_sq"].append(error**2)
         results["trace_P"].append(float(jnp.trace(kf_model.P)))
+        results["weight_norm"].append(float(jnp.linalg.norm(kf_model.mu)))
 
         # Update buffer for next iteration
         input_buffer.append(z_noisy_t)
@@ -246,6 +250,7 @@ def combine_results(*results_list) -> dict[str, np.ndarray]:
         "innovation": [],
         "innovation_sq": [],
         "trace_P": [],
+        "weight_norm": [],
     }
 
     for results in results_list:
@@ -268,8 +273,8 @@ TASK_CONFIGS: dict[int, dict[str, float]] = {
     },
     1: {
         "k": 20.0,
-        "amplitude": 15.0,
-        "damping": 0.19,
+        "amplitude": 25.0,
+        "damping": 0.5,
         "noise_std": 0.03,
     },
 }
@@ -411,8 +416,8 @@ if __name__ == "__main__":
 
     # Kalman Filter hyperparameters
     KF_RHO = 1.0
-    KF_Q_STD = 0.0002
-    KF_R_STD = 0.01
+    KF_Q_STD = 0
+    KF_R_STD = 0.003
 
     # Initialize Kalman Filter Head
     kf = KalmanFilterHead(feature_dim=HIDDEN_SIZE, rho=KF_RHO, Q_std=KF_Q_STD, R_std=KF_R_STD)
@@ -834,6 +839,103 @@ if __name__ == "__main__":
         backward_mode=BACKWARD_EXTRAPOLATION,
         save_path=save_path_bll,
     )
+
+    # ==========================================
+    # WEIGHT NORM COMPARISON
+    # ==========================================
+    print("\n" + "=" * 70)
+    print("Generating Weight Norm Comparison...")
+    print("=" * 70)
+
+    # Create weight norm comparison figure
+    fig_weight = plt.figure(figsize=(14, 6))
+
+    # Extract weight norms
+    r_kf = results["r"]
+    weight_norm_kf = results["weight_norm"]
+    r_bll = bll_results["r"]
+    weight_norm_bll = bll_results["weight_norm"]
+
+    # Find switch point
+    if BACKWARD_EXTRAPOLATION:
+        switch_idx_kf = np.where(task_ids == 0)[0][0] if 0 in task_ids else len(r_kf)
+        switch_idx_bll = np.where(bll_task_ids == 0)[0][0] if 0 in bll_task_ids else len(r_bll)
+    else:
+        switch_idx_kf = np.where(task_ids == 1)[0][0] if 1 in task_ids else len(r_kf)
+        switch_idx_bll = np.where(bll_task_ids == 1)[0][0] if 1 in bll_task_ids else len(r_bll)
+
+    switch_r_kf = r_kf[switch_idx_kf] if switch_idx_kf < len(r_kf) else r_kf[-1]
+    switch_r_bll = r_bll[switch_idx_bll] if switch_idx_bll < len(r_bll) else r_bll[-1]
+
+    # Plot 1: KF Weight Norm
+    ax1_weight = plt.subplot(1, 2, 1)
+    ax1_weight.set_title("Kalman Filter: Weight Vector Norm Over Time", fontsize=12, fontweight="bold")
+    ax1_weight.plot(r_kf, weight_norm_kf, "r-", linewidth=2, label="KF Weight Norm")
+    ax1_weight.axvline(switch_r_kf, color="orange", linestyle=":", linewidth=2, label="Task Boundary")
+    ax1_weight.set_xlabel("Radius (r)")
+    ax1_weight.set_ylabel("||w|| (L2 Norm)")
+    ax1_weight.legend(loc="best", fontsize=10)
+    ax1_weight.grid(True, alpha=0.3)
+
+    # Add region labels
+    if BACKWARD_EXTRAPOLATION:
+        ax1_weight.text(
+            r_kf[len(r_kf) // 4],
+            ax1_weight.get_ylim()[1] * 0.9,
+            "Task 1\n(Testing)",
+            ha="center",
+            fontsize=9,
+            bbox={"boxstyle": "round", "facecolor": "lightyellow", "alpha": 0.5},
+        )
+        if switch_idx_kf < len(r_kf):
+            ax1_weight.text(
+                r_kf[switch_idx_kf + (len(r_kf) - switch_idx_kf) // 2],
+                ax1_weight.get_ylim()[1] * 0.9,
+                "Task 0\n(Training)",
+                ha="center",
+                fontsize=9,
+                bbox={"boxstyle": "round", "facecolor": "lightgreen", "alpha": 0.5},
+            )
+
+    # Plot 2: BLL Weight Norm
+    ax2_weight = plt.subplot(1, 2, 2)
+    ax2_weight.set_title("Bayesian Last Layer: Weight Vector Norm Over Time", fontsize=12, fontweight="bold")
+    ax2_weight.plot(r_bll, weight_norm_bll, "b-", linewidth=2, label="BLL Weight Norm (Constant)")
+    ax2_weight.axvline(switch_r_bll, color="orange", linestyle=":", linewidth=2, label="Task Boundary")
+    ax2_weight.set_xlabel("Radius (r)")
+    ax2_weight.set_ylabel("||w|| (L2 Norm)")
+    ax2_weight.legend(loc="best", fontsize=10)
+    ax2_weight.grid(True, alpha=0.3)
+
+    # Add region labels
+    if BACKWARD_EXTRAPOLATION:
+        ax2_weight.text(
+            r_bll[len(r_bll) // 4],
+            ax2_weight.get_ylim()[1] * 0.9,
+            "Task 1\n(Testing)",
+            ha="center",
+            fontsize=9,
+            bbox={"boxstyle": "round", "facecolor": "lightyellow", "alpha": 0.5},
+        )
+        if switch_idx_bll < len(r_bll):
+            ax2_weight.text(
+                r_bll[switch_idx_bll + (len(r_bll) - switch_idx_bll) // 2],
+                ax2_weight.get_ylim()[1] * 0.9,
+                "Task 0\n(Training)",
+                ha="center",
+                fontsize=9,
+                bbox={"boxstyle": "round", "facecolor": "lightgreen", "alpha": 0.5},
+            )
+
+    plt.suptitle("Weight Norm Comparison: KF vs BLL", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+
+    # Save figure
+    mode = "backward" if BACKWARD_EXTRAPOLATION else "forward"
+    save_path_weight = f"results/figures/Bessel_Ripple_Weight_Norm_{mode}.png"
+    plt.savefig(save_path_weight, dpi=300, bbox_inches="tight")
+    print(f"\nWeight Norm Comparison Figure saved to {save_path_weight}")
+    plt.show()
 
     print("\n" + "=" * 70)
     print("ALL EXPERIMENTS COMPLETE!")
