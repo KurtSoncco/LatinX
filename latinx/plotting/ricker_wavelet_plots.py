@@ -1,7 +1,7 @@
 """
-Plotting functions for Mexican Hat (Laplacian of Gaussian) datasets.
+Plotting functions for ricker wavelet (Laplacian of Gaussian) datasets.
 
-This module provides various visualization utilities for Mexican Hat data,
+This module provides various visualization utilities for ricker wavelet data,
 including 3D surface plots, contour plots, and comparison visualizations.
 """
 
@@ -12,7 +12,7 @@ from mpl_toolkits.mplot3d import Axes3D
 from typing import Tuple, Optional
 
 
-def plot_mexican_hat(
+def plot_ricker_wavelet(
     data: pd.DataFrame,
     column: str = "z",
     figsize: Tuple[int, int] = (14, 5),
@@ -21,7 +21,7 @@ def plot_mexican_hat(
     save_path: Optional[str] = None,
 ):
     """
-    Create a comprehensive visualization of Mexican Hat data with 3D and 2D views.
+    Create a comprehensive visualization of ricker wavelet data with 3D and 2D views.
 
     Displays three subplots:
     1. 3D surface plot
@@ -32,7 +32,7 @@ def plot_mexican_hat(
         data: DataFrame with columns 'x', 'y', and the specified z column.
         column: Name of the z-value column to plot (default: 'z').
         figsize: Figure size as (width, height) tuple.
-        title: Overall figure title. If None, uses "Mexican Hat Function".
+        title: Overall figure title. If None, uses "ricker wavelet Function".
         cmap: Colormap for surface and contour plots.
         save_path: If provided, save figure to this path.
 
@@ -40,7 +40,7 @@ def plot_mexican_hat(
         Matplotlib figure object.
     """
     if title is None:
-        title = f"Mexican Hat Function ({column})"
+        title = f"ricker wavelet Function ({column})"
 
     # Infer grid size
     n_unique_x = data["x"].nunique()
@@ -109,7 +109,7 @@ def plot_mexican_hat(
     return fig
 
 
-def plot_mexican_hat_3d(
+def plot_ricker_wavelet_3d(
     data: pd.DataFrame,
     column: str = "z",
     figsize: Tuple[int, int] = (8, 6),
@@ -120,13 +120,13 @@ def plot_mexican_hat_3d(
     save_path: Optional[str] = None,
 ):
     """
-    Create a standalone 3D surface plot of Mexican Hat data.
+    Create a standalone 3D surface plot of ricker wavelet data.
 
     Args:
         data: DataFrame with columns 'x', 'y', and the specified z column.
         column: Name of the z-value column to plot (default: 'z').
         figsize: Figure size as (width, height) tuple.
-        title: Plot title. If None, uses "Mexican Hat - 3D Surface".
+        title: Plot title. If None, uses "ricker wavelet - 3D Surface".
         cmap: Colormap for the surface.
         elev: Elevation angle for 3D view.
         azim: Azimuth angle for 3D view.
@@ -136,7 +136,7 @@ def plot_mexican_hat_3d(
         Matplotlib figure object.
     """
     if title is None:
-        title = f"Mexican Hat - 3D Surface ({column})"
+        title = f"ricker wavelet - 3D Surface ({column})"
 
     # Infer grid size and reshape
     n_unique_x = data["x"].nunique()
@@ -169,7 +169,7 @@ def plot_mexican_hat_3d(
     return fig
 
 
-def plot_mexican_hat_contour(
+def plot_ricker_wavelet_contour(
     data: pd.DataFrame,
     column: str = "z",
     figsize: Tuple[int, int] = (7, 6),
@@ -180,13 +180,13 @@ def plot_mexican_hat_contour(
     save_path: Optional[str] = None,
 ):
     """
-    Create a standalone contour plot of Mexican Hat data.
+    Create a standalone contour plot of ricker wavelet data.
 
     Args:
         data: DataFrame with columns 'x', 'y', and the specified z column.
         column: Name of the z-value column to plot (default: 'z').
         figsize: Figure size as (width, height) tuple.
-        title: Plot title. If None, uses "Mexican Hat - Contour".
+        title: Plot title. If None, uses "ricker wavelet - Contour".
         cmap: Colormap for filled contours.
         levels: Number of contour levels.
         show_lines: If True, overlay black contour lines.
@@ -196,7 +196,7 @@ def plot_mexican_hat_contour(
         Matplotlib figure object.
     """
     if title is None:
-        title = f"Mexican Hat - Contour ({column})"
+        title = f"ricker wavelet - Contour ({column})"
 
     # Infer grid size and reshape
     n_unique_x = data["x"].nunique()
@@ -231,7 +231,7 @@ def plot_mexican_hat_contour(
     return fig
 
 
-def plot_mexican_hat_comparison(
+def plot_ricker_wavelet_comparison(
     data: pd.DataFrame,
     columns: Tuple[str, str] = ("z", "z_noisy"),
     labels: Optional[Tuple[str, str]] = None,
@@ -241,7 +241,7 @@ def plot_mexican_hat_comparison(
     save_path: Optional[str] = None,
 ):
     """
-    Compare two Mexican Hat datasets side-by-side (e.g., clean vs noisy).
+    Compare two ricker wavelet datasets side-by-side (e.g., clean vs noisy).
 
     Creates a figure with two 3D surface plots for comparison.
 
@@ -261,7 +261,7 @@ def plot_mexican_hat_comparison(
         labels = columns
 
     if title is None:
-        title = f"Mexican Hat Comparison: {labels[0]} vs {labels[1]}"
+        title = f"ricker wavelet Comparison: {labels[0]} vs {labels[1]}"
 
     # Infer grid size and reshape
     n_unique_x = data["x"].nunique()

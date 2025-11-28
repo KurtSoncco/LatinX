@@ -1,8 +1,8 @@
 """
-Example: Using Mexican Hat dataset for ML tasks with visualization.
+Example: Using ricker wavelet dataset for ML tasks with visualization.
 
 Demonstrates:
-1. Generating Mexican Hat data
+1. Generating ricker wavelet data
 2. Visualizing the 2D function with plotting utilities
 3. Using it with Bayesian Last Layer model
 4. Comparing predictions vs ground truth
@@ -12,25 +12,25 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from latinx.data.mexican_hat import MexicanHatTranslator
+from latinx.data.ricker_wavelet import RickerWaveletTranslator
 from latinx.models.bayesian_last_layer import BayesianLastLayer
 from latinx.plotting import (
-    plot_mexican_hat,
-    plot_mexican_hat_3d,
-    plot_mexican_hat_contour,
-    plot_mexican_hat_comparison,
+    plot_ricker_wavelet,
+    plot_ricker_wavelet_3d,
+    plot_ricker_wavelet_contour,
+    plot_ricker_wavelet_comparison,
     plot_bll_vs_full_nn
 )
 
 
 def main():
     print("=" * 60)
-    print("Mexican Hat Dataset Example with Visualization")
+    print("ricker wavelet Dataset Example with Visualization")
     print("=" * 60)
 
-    # 1. Generate Mexican Hat data
-    print("\n1. Generating Mexican Hat data...")
-    translator = MexicanHatTranslator(
+    # 1. Generate ricker wavelet data
+    print("\n1. Generating ricker wavelet data...")
+    translator = RickerWaveletTranslator(
         sigma=1.5,
         amplitude=2.0,
         x_range=(-5, 5),
@@ -44,30 +44,30 @@ def main():
     print(f"Generated {len(data)} data points")
     print(f"Grid size: {translator.grid_size}x{translator.grid_size}")
 
-    # 2. Visualize clean Mexican Hat
+    # 2. Visualize clean ricker wavelet
     print("\n2. Creating comprehensive visualization of clean function...")
-    fig1 = plot_mexican_hat(
+    fig1 = plot_ricker_wavelet(
         data,
         column="z",
-        title="Mexican Hat Function - Clean Data (σ=1.5, A=2.0)",
+        title="ricker wavelet Function - Clean Data (σ=1.5, A=2.0)",
         cmap="viridis",
     )
 
     # 3. Visualize noisy data
     print("\n3. Creating visualization of noisy data...")
-    fig2 = plot_mexican_hat(
+    fig2 = plot_ricker_wavelet(
         data,
         column="z_noisy",
-        title="Mexican Hat Function - Noisy Data (noise σ=0.1)",
+        title="ricker wavelet Function - Noisy Data (noise σ=0.1)",
         cmap="plasma",
     )
 
     # 4. Create standalone 3D plot
     print("\n4. Creating 3D surface plot...")
-    fig3 = plot_mexican_hat_3d(
+    fig3 = plot_ricker_wavelet_3d(
         data,
         column="z",
-        title="Mexican Hat - 3D Surface View",
+        title="ricker wavelet - 3D Surface View",
         cmap="coolwarm",
         elev=25,
         azim=45,
@@ -75,10 +75,10 @@ def main():
 
     # 5. Create contour plot
     print("\n5. Creating contour plot...")
-    fig4 = plot_mexican_hat_contour(
+    fig4 = plot_ricker_wavelet_contour(
         data,
         column="z",
-        title="Mexican Hat - Contour Map",
+        title="ricker wavelet - Contour Map",
         cmap="viridis",
         levels=25,
         show_lines=True,
@@ -86,11 +86,11 @@ def main():
 
     # 6. Compare clean vs noisy
     print("\n6. Creating clean vs noisy comparison...")
-    fig5 = plot_mexican_hat_comparison(
+    fig5 = plot_ricker_wavelet_comparison(
         data,
         columns=("z", "z_noisy"),
         labels=("Clean Function", "With Noise (σ=0.1)"),
-        title="Mexican Hat: Clean vs Noisy Data Comparison",
+        title="ricker wavelet: Clean vs Noisy Data Comparison",
         cmap="viridis",
     )
 
@@ -133,11 +133,11 @@ def main():
     print("\n9. Visualizing BLL predictions...")
     data['z_predicted'] = np.array(y_pred)
 
-    fig6 = plot_mexican_hat_comparison(
+    fig6 = plot_ricker_wavelet_comparison(
         data,
         columns=("z", "z_predicted"),
         labels=("Ground Truth", "BLL Predictions"),
-        title="Mexican Hat: Ground Truth vs BLL Predictions",
+        title="ricker wavelet: Ground Truth vs BLL Predictions",
         cmap="plasma",
     )
 
@@ -146,7 +146,7 @@ def main():
     print("10. Testing extrapolation...")
     print("=" * 60)
 
-    translator_test = MexicanHatTranslator(
+    translator_test = RickerWaveletTranslator(
         sigma=1.5,
         amplitude=2.0,
         x_range=(-7, 7),  # Larger range for extrapolation
@@ -178,16 +178,16 @@ def main():
     data_test['uncertainty'] = np.array(y_std_test)
 
     # Create comparison on test grid
-    fig7 = plot_mexican_hat_comparison(
+    fig7 = plot_ricker_wavelet_comparison(
         data_test,
         columns=("z", "z_predicted"),
         labels=("True Function (Extended)", "BLL Extrapolation"),
-        title="Mexican Hat: Extrapolation to Larger Domain",
+        title="ricker wavelet: Extrapolation to Larger Domain",
         cmap="viridis",
     )
 
     # Visualize uncertainty on extended grid
-    fig8 = plot_mexican_hat(
+    fig8 = plot_ricker_wavelet(
         data_test,
         column="uncertainty",
         title="Prediction Uncertainty on Extended Domain",
@@ -230,10 +230,10 @@ def main():
     print(f"- Uncertainty increases {unc_out / unc_in:.2f}x outside training range")
     print("\nTo save plots, add save_path parameter:")
     print("""
-    plot_mexican_hat(
+    plot_ricker_wavelet(
         data,
         column='z',
-        save_path='mexican_hat_plot.png'
+        save_path='ricker_wavelet_plot.png'
     )
     """)
 

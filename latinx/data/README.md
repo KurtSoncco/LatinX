@@ -25,16 +25,16 @@ data = translator.generate()  # Returns DataFrame with 't', 'sine', 'cosine', 'x
 
 ---
 
-### 2. Mexican Hat (`mexican_hat`)
+### 2. ricker wavelet (`ricker_wavelet`)
 
-Generates 2D radially symmetric Laplacian of Gaussian (Mexican Hat wavelet) data.
+Generates 2D radially symmetric Laplacian of Gaussian (ricker wavelet wavelet) data.
 
 **Equation**: `z(r) = (1 - r²/σ²) * exp(-r²/(2σ²))` where `r = sqrt(x² + y²)`
 
 ```python
-from latinx.data.mexican_hat import MexicanHatTranslator
+from latinx.data.ricker_wavelet import RickerWaveletTranslator
 
-translator = MexicanHatTranslator(
+translator = RickerWaveletTranslator(
     sigma=1.5,           # Scale parameter
     amplitude=2.0,       # Amplitude multiplier
     x_range=(-5, 5),     # X coordinate range
@@ -136,7 +136,7 @@ All dataset generators follow a consistent API:
 - Input: `t`
 - Outputs: `sine`, `cosine`, etc.
 
-**2D datasets** (mexican_hat, bessel_ripple):
+**2D datasets** (ricker_wavelet, bessel_ripple):
 - Inputs: `x`, `y`
 - Outputs: `z` (clean), `z_noisy` (with noise)
 - Derived: `r` (radial distance)
@@ -175,7 +175,7 @@ y_pred, y_std = bll.predict(X, return_std=True)
 | Dataset | Dimensionality | Smoothness | Oscillatory | Bounded | Radial Symmetry |
 |---------|---------------|------------|-------------|---------|-----------------|
 | Sine-Cosine | 1D | C∞ | Yes | Yes | N/A |
-| Mexican Hat | 2D | C∞ | No | No | Yes |
+| ricker wavelet | 2D | C∞ | No | No | Yes |
 | Bessel Ripple | 2D | C∞ | Yes | No | Yes |
 
 ---
@@ -184,7 +184,7 @@ y_pred, y_std = bll.predict(X, return_std=True)
 
 See `examples/` directory for complete usage examples:
 - `examples/bayesian_last_layer_example.py` - Using sine-cosine data
-- `examples/mexican_hat_example.py` - 2D Mexican Hat function learning
+- `examples/ricker_wavelet_example.py` - 2D ricker wavelet function learning
 - `examples/bessel_ripple_example.py` - Learning water ripple patterns
 
 ---
@@ -208,7 +208,7 @@ uv run pytest tests/data/ -v
 
 ## References
 
-**Mexican Hat**:
+**ricker wavelet**:
 - Bishop, C. M. (2006). *Pattern Recognition and Machine Learning*. Springer.
 - Wavelet theory and applications
 

@@ -1,7 +1,7 @@
 """
-Mexican Hat (Laplacian of Gaussian) function dataset generator.
+Ricker Wavelet (Laplacian of Gaussian) function dataset generator.
 
-The Mexican Hat function is a radially symmetric wavelet that resembles
+The Ricker Wavelet function is a radially symmetric wavelet that resembles
 a sombrero. It's the Laplacian of a 2D Gaussian and is useful for feature
 detection and signal processing applications.
 
@@ -14,9 +14,9 @@ import numpy as np
 import pandas as pd
 
 
-class MexicanHatTranslator:
+class RickerWaveletTranslator:
     """
-    Generation of Mexican Hat (Laplacian of Gaussian) function data.
+    Generation of Ricker Wavelet (Laplacian of Gaussian) function data.
 
     This generator creates a 2D radially symmetric function with a central peak
     and surrounding trough, useful for testing ML models on smooth analytical functions.
@@ -59,16 +59,16 @@ class MexicanHatTranslator:
         self.noise_std = noise_std
         self.seed = seed
 
-    def mexican_hat_function(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    def ricker_wavelet_function(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
         """
-        Compute the Mexican Hat function at given coordinates.
+        Compute the Ricker Wavelet function at given coordinates.
 
         Args:
             x: X coordinates (can be array or meshgrid)
             y: Y coordinates (can be array or meshgrid)
 
         Returns:
-            Mexican Hat function values
+            Ricker Wavelet function values
         """
         r_squared = x**2 + y**2
         sigma_squared = self.sigma**2
@@ -78,18 +78,18 @@ class MexicanHatTranslator:
 
     @property
     def function(self):
-        """Return a callable Mexican Hat function."""
-        return lambda x, y: self.mexican_hat_function(x, y)
+        """Return a callable Ricker Wavelet function."""
+        return lambda x, y: self.ricker_wavelet_function(x, y)
 
     def generate(self) -> pd.DataFrame:
         """
-        Generate Mexican Hat function data on a 2D grid.
+        Generate Ricker Wavelet function data on a 2D grid.
 
         Returns:
             DataFrame with columns:
                 - x: X coordinate
                 - y: Y coordinate
-                - z: Clean Mexican Hat function value
+                - z: Clean Ricker Wavelet function value
                 - z_noisy: Function value with added Gaussian noise
                 - r: Radial distance from origin (sqrt(x² + y²))
         """
@@ -105,8 +105,8 @@ class MexicanHatTranslator:
         x_flat = X.flatten()
         y_flat = Y.flatten()
 
-        # Compute Mexican Hat values
-        z_clean = self.mexican_hat_function(x_flat, y_flat)
+        # Compute Ricker Wavelet values
+        z_clean = self.ricker_wavelet_function(x_flat, y_flat)
 
         # Add noise
         noise = np.random.normal(0, self.noise_std, size=z_clean.shape)
@@ -128,11 +128,11 @@ class MexicanHatTranslator:
 
     def generate_grid(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Generate Mexican Hat data in meshgrid format (useful for 3D plotting).
+        Generate Ricker Wavelet data in meshgrid format (useful for 3D plotting).
 
         Returns:
             Tuple of (X, Y, Z) where X and Y are coordinate meshgrids
-            and Z is the Mexican Hat function values.
+            and Z is the Ricker Wavelet function values.
         """
         if self.seed is not None:
             np.random.seed(self.seed)
@@ -141,7 +141,7 @@ class MexicanHatTranslator:
         y = np.linspace(self.y_range[0], self.y_range[1], self.grid_size)
         X, Y = np.meshgrid(x, y)
 
-        Z = self.mexican_hat_function(X, Y)
+        Z = self.ricker_wavelet_function(X, Y)
 
         if self.noise_std > 0:
             noise = np.random.normal(0, self.noise_std, size=Z.shape)
