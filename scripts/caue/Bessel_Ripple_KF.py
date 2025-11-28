@@ -42,13 +42,7 @@ from latinx.metrics.metrics_kalman_filter import (
     trace_covariance,
 )
 from latinx.models.kalman_filter import KalmanFilterHead
-
-# Import the RNN from Sine_LRU example
-import sys
-from pathlib import Path
-# Add scripts/kurt to path for import
-sys.path.append(str(Path(__file__).parent))
-from Sine_LRU import SimpleRNN
+from latinx.models.rnn import SimpleRNN
 
 
 # ==========================================
