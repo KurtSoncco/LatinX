@@ -158,7 +158,7 @@ def run_multiout_kf_with_updates(
             features_tensor, _ = rnn_model(input_tensor)
 
         # Convert to JAX for Kalman Filter
-        phi = jnp.array(features_tensor.numpy().T)  # Shape (HIDDEN_SIZE, 1)
+        phi = jnp.array(features_tensor.detach().numpy().T)  # Shape (HIDDEN_SIZE, 1)
 
         # KF prediction (returns 3D vector)
         xyz_pred = kf_model.predict(phi)  # (3,)
@@ -222,7 +222,7 @@ def run_multiout_kf_prediction_only(
         with torch.no_grad():
             features_tensor, _ = rnn_model(input_tensor)
 
-        phi = jnp.array(features_tensor.numpy().T)
+        phi = jnp.array(features_tensor.detach().numpy().T)
 
         # KF prediction only (no update)
         xyz_pred = kf_model.predict(phi)
