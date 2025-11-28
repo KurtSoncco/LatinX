@@ -19,7 +19,7 @@ from latinx.plotting import (
     plot_ricker_wavelet_3d,
     plot_ricker_wavelet_contour,
     plot_ricker_wavelet_comparison,
-    plot_bll_vs_full_nn
+    plot_bll_vs_full_nn,
 )
 
 
@@ -115,7 +115,7 @@ def main():
     loss_history = bll.fit(X, y_target)
     print(f"Initial loss: {loss_history[0]:.6f}")
     print(f"Final loss: {loss_history[-1]:.6f}")
-    print(f"Loss reduction: {(1 - loss_history[-1]/loss_history[0])*100:.2f}%")
+    print(f"Loss reduction: {(1 - loss_history[-1] / loss_history[0]) * 100:.2f}%")
 
     # 8. Make predictions
     print("\n" + "=" * 60)
@@ -131,7 +131,7 @@ def main():
 
     # 9. Add predictions to data and visualize
     print("\n9. Visualizing BLL predictions...")
-    data['z_predicted'] = np.array(y_pred)
+    data["z_predicted"] = np.array(y_pred)
 
     fig6 = plot_ricker_wavelet_comparison(
         data,
@@ -174,8 +174,8 @@ def main():
 
     # 11. Visualize extrapolation with uncertainty
     print("\n11. Visualizing extrapolation results...")
-    data_test['z_predicted'] = np.array(y_pred_test)
-    data_test['uncertainty'] = np.array(y_std_test)
+    data_test["z_predicted"] = np.array(y_pred_test)
+    data_test["uncertainty"] = np.array(y_std_test)
 
     # Create comparison on test grid
     fig7 = plot_ricker_wavelet_comparison(
@@ -196,8 +196,7 @@ def main():
 
     print("\n11. Creating BLL vs Full NN comparison plot...")
     y_pred_nn = bll.predict_full_nn(X)
-    rmse_full_nn = np.sqrt((np.mean(y_target- y_pred_nn)**2))
-
+    rmse_full_nn = np.sqrt((np.mean(y_target - y_pred_nn) ** 2))
 
     fig_comparison_bessel = plot_bll_vs_full_nn(
         data=data,
@@ -209,7 +208,6 @@ def main():
     )
 
     print(f"RMSE BLL: {rmse}, RMSE Normal NN {rmse_full_nn}")
-
 
     print("\n" + "=" * 60)
     print("All visualizations created!")

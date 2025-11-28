@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 
+
 class SimpleRNN(nn.Module):
     """
     Simple RNN model with feature extraction and optional prediction head.

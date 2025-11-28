@@ -47,9 +47,7 @@ def test_plot_ricker_wavelet_with_noisy_column(ricker_wavelet_data):
 
 def test_plot_ricker_wavelet_3d(ricker_wavelet_data):
     """Test standalone 3D surface plot."""
-    fig = plot_ricker_wavelet_3d(
-        ricker_wavelet_data, column="z", cmap="viridis", elev=30, azim=45
-    )
+    fig = plot_ricker_wavelet_3d(ricker_wavelet_data, column="z", cmap="viridis", elev=30, azim=45)
 
     assert fig is not None
     assert isinstance(fig, plt.Figure)
@@ -73,9 +71,7 @@ def test_plot_ricker_wavelet_contour(ricker_wavelet_data):
 
 def test_plot_ricker_wavelet_contour_no_lines(ricker_wavelet_data):
     """Test contour plot without lines."""
-    fig = plot_ricker_wavelet_contour(
-        ricker_wavelet_data, column="z", show_lines=False
-    )
+    fig = plot_ricker_wavelet_contour(ricker_wavelet_data, column="z", show_lines=False)
 
     assert fig is not None
     plt.close(fig)

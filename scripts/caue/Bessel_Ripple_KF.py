@@ -49,6 +49,7 @@ from latinx.models.rnn import SimpleRNN
 # HELPER FUNCTIONS FOR KF PROCESSING
 # ==========================================
 
+
 def run_kf_with_updates(
     kf_model: KalmanFilterHead,
     rnn_model: nn.Module,
@@ -102,9 +103,7 @@ def run_kf_with_updates(
         z_noisy_t = z_noisy[t]
 
         # Extract features using frozen RNN
-        input_tensor = torch.tensor(
-            np.array(input_buffer), dtype=torch.float32
-        ).view(1, seq_len, 1)
+        input_tensor = torch.tensor(np.array(input_buffer), dtype=torch.float32).view(1, seq_len, 1)
 
         with torch.no_grad():
             features_tensor, _ = rnn_model(input_tensor)
@@ -187,9 +186,7 @@ def run_kf_prediction_only(
         z_noisy_t = z_noisy[t]
 
         # Extract features using frozen RNN
-        input_tensor = torch.tensor(
-            np.array(input_buffer), dtype=torch.float32
-        ).view(1, seq_len, 1)
+        input_tensor = torch.tensor(np.array(input_buffer), dtype=torch.float32).view(1, seq_len, 1)
 
         with torch.no_grad():
             features_tensor, _ = rnn_model(input_tensor)
@@ -218,7 +215,7 @@ def run_kf_prediction_only(
         results["z_pred_kf"].append(z_pred_kf)
         results["sigma_kf"].append(np.sqrt(uncertainty_S))
         results["innovation"].append(error)
-        results["innovation_sq"].append(error ** 2)
+        results["innovation_sq"].append(error**2)
         results["trace_P"].append(float(jnp.trace(kf_model.P)))
 
         # Update buffer for next iteration
@@ -264,13 +261,13 @@ TASK_CONFIGS: dict[int, dict[str, float]] = {
         "k": 6.0,
         "amplitude": 1.0,
         "damping": 0.05,
-        "noise_std": 0.03, 
+        "noise_std": 0.03,
     },
     1: {
         "k": 20.0,
-        "amplitude": 15.0,  
+        "amplitude": 15.0,
         "damping": 0.19,
-        "noise_std": 0.03,  
+        "noise_std": 0.03,
     },
 }
 
@@ -341,7 +338,7 @@ if __name__ == "__main__":
     PRETRAIN_EPOCHS = 150
 
     # Build radial datasets (one sample per radius)
-    task_data = _build_task_data_radial(n_radial_points=N_RADIAL_POINTS,r_max=8)
+    task_data = _build_task_data_radial(n_radial_points=N_RADIAL_POINTS, r_max=8)
 
     # Create RNN model (reusing from Sine_LRU)
     rnn_model = SimpleRNN(input_size=1, hidden_size=HIDDEN_SIZE)
@@ -365,7 +362,7 @@ if __name__ == "__main__":
         # Train on first half (inner radii)
         z_values = z_values_full[:split_idx]
         print(f"Training on FIRST HALF: indices [0:{split_idx}]")
-        print(f"  (inner radii: r ≈ {task0['r'][0]:.2f} to {task0['r'][split_idx-1]:.2f})")
+        print(f"  (inner radii: r ≈ {task0['r'][0]:.2f} to {task0['r'][split_idx - 1]:.2f})")
 
     print(f"Creating sequences from {len(z_values)} radial samples (1 per radius)...")
     print(f"Sequence length: {SEQ_LEN} (learning pattern over {SEQ_LEN} radius steps)")
@@ -375,9 +372,9 @@ if __name__ == "__main__":
     targets = []
     for i in range(len(z_values) - SEQ_LEN):
         # Input: sequence of z values at consecutive radii
-        seq_in = z_values[i:i+SEQ_LEN]
+        seq_in = z_values[i : i + SEQ_LEN]
         # Target: z value at the next radius
-        target_out = z_values[i+SEQ_LEN]
+        target_out = z_values[i + SEQ_LEN]
 
         inputs.append(seq_in.reshape(SEQ_LEN, 1))
         targets.append(target_out)
@@ -432,38 +429,37 @@ if __name__ == "__main__":
 
         # Train KF on second half (interpolation region)
         results_train = run_kf_with_updates(
-            kf, rnn_model, r_values, z_clean, z_noisy,
-            SWITCH_POINT, len(r_values), SEQ_LEN
+            kf, rnn_model, r_values, z_clean, z_noisy, SWITCH_POINT, len(r_values), SEQ_LEN
         )
 
         print(f"\nStep 2: Testing KF on FIRST HALF (inner radii - extrapolation)")
         print(f"  Indices: [0, {SWITCH_POINT})")
-        print(f"  Radius range: r ∈ [{r_values[0]:.2f}, {r_values[SWITCH_POINT-1]:.2f}]")
+        print(f"  Radius range: r ∈ [{r_values[0]:.2f}, {r_values[SWITCH_POINT - 1]:.2f}]")
 
         # Test KF on first half (extrapolation region)
         results_test = run_kf_prediction_only(
-            kf, rnn_model, r_values, z_clean, z_noisy,
-            0, SWITCH_POINT, SEQ_LEN
+            kf, rnn_model, r_values, z_clean, z_noisy, 0, SWITCH_POINT, SEQ_LEN
         )
 
         # Combine: extrapolation first, then interpolation
         results = combine_results(results_test, results_train)
-        task_ids = np.concatenate([
-            np.zeros(len(results_test["r"])),  # 0 = extrapolation
-            np.ones(len(results_train["r"]))   # 1 = interpolation
-        ])
+        task_ids = np.concatenate(
+            [
+                np.zeros(len(results_test["r"])),  # 0 = extrapolation
+                np.ones(len(results_train["r"])),  # 1 = interpolation
+            ]
+        )
 
     else:
         print("\nPhase 2: Normal Mode (Task Switching)")
         print("=" * 60)
         print("Step 1: Training KF on FIRST HALF (Task 0, amplitude=1.0)")
         print(f"  Indices: [0, {SWITCH_POINT})")
-        print(f"  Radius range: r ∈ [{r_values[0]:.2f}, {r_values[SWITCH_POINT-1]:.2f}]")
+        print(f"  Radius range: r ∈ [{r_values[0]:.2f}, {r_values[SWITCH_POINT - 1]:.2f}]")
 
         # Train KF on first half (Task 0)
         results_train = run_kf_with_updates(
-            kf, rnn_model, r_values, z_clean, z_noisy,
-            0, SWITCH_POINT, SEQ_LEN
+            kf, rnn_model, r_values, z_clean, z_noisy, 0, SWITCH_POINT, SEQ_LEN
         )
 
         print(f"\nStep 2: Testing KF on SECOND HALF (Task 1, amplitude=2.0)")
@@ -477,16 +473,24 @@ if __name__ == "__main__":
 
         # Test KF on second half (Task 1)
         results_test = run_kf_prediction_only(
-            kf, rnn_model, r_values, z_clean_task1, z_noisy_task1,
-            SWITCH_POINT, len(r_values), SEQ_LEN
+            kf,
+            rnn_model,
+            r_values,
+            z_clean_task1,
+            z_noisy_task1,
+            SWITCH_POINT,
+            len(r_values),
+            SEQ_LEN,
         )
 
         # Combine: training first, then testing
         results = combine_results(results_train, results_test)
-        task_ids = np.concatenate([
-            np.zeros(len(results_train["r"])),  # 0 = Task 0
-            np.ones(len(results_test["r"]))     # 1 = Task 1
-        ])
+        task_ids = np.concatenate(
+            [
+                np.zeros(len(results_train["r"])),  # 0 = Task 0
+                np.ones(len(results_test["r"])),  # 1 = Task 1
+            ]
+        )
 
     print("\nOnline adaptation complete!")
 
@@ -521,7 +525,9 @@ if __name__ == "__main__":
     ax1.plot(r_axis, z_pred_kf, "r-", label="KF Prediction", linewidth=2)
 
     if BACKWARD_EXTRAPOLATION:
-        ax1.axvline(switch_r, color="orange", linestyle=":", linewidth=2, label="Train/Test Boundary")
+        ax1.axvline(
+            switch_r, color="orange", linestyle=":", linewidth=2, label="Train/Test Boundary"
+        )
     else:
         ax1.axvline(switch_r, color="green", linestyle=":", linewidth=2, label="Task Switch")
 
@@ -533,7 +539,7 @@ if __name__ == "__main__":
     if BACKWARD_EXTRAPOLATION:
         # Backward extrapolation labels
         ax1.text(
-            r_axis[len(r_axis)//4],
+            r_axis[len(r_axis) // 4],
             ax1.get_ylim()[1] * 0.85,
             "EXTRAPOLATION\n(inner radii)\nNot Trained",
             ha="center",
@@ -543,7 +549,7 @@ if __name__ == "__main__":
         )
         if switch_idx < len(r_axis):
             ax1.text(
-                r_axis[switch_idx + (len(r_axis) - switch_idx)//2],
+                r_axis[switch_idx + (len(r_axis) - switch_idx) // 2],
                 ax1.get_ylim()[1] * 0.85,
                 "INTERPOLATION\n(outer radii)\nTrained\nKF Updates",
                 ha="center",
@@ -554,7 +560,7 @@ if __name__ == "__main__":
     else:
         # Normal mode labels
         ax1.text(
-            r_axis[len(r_axis)//4],
+            r_axis[len(r_axis) // 4],
             ax1.get_ylim()[1] * 0.85,
             "Task 0\n(A=1.0)\nKF Training",
             ha="center",
@@ -564,7 +570,7 @@ if __name__ == "__main__":
         )
         if switch_idx < len(r_axis):
             ax1.text(
-                r_axis[switch_idx + (len(r_axis) - switch_idx)//2],
+                r_axis[switch_idx + (len(r_axis) - switch_idx) // 2],
                 ax1.get_ylim()[1] * 0.85,
                 "Task 1\n(A=2.0)\nPrediction Only",
                 ha="center",
@@ -655,9 +661,7 @@ if __name__ == "__main__":
 
     abs_error_kf = np.abs(z_true - z_pred_kf)
     kf_rmse_region0 = np.sqrt(np.mean(abs_error_kf[region0_mask] ** 2))
-    kf_rmse_region1 = (
-        np.sqrt(np.mean(abs_error_kf[region1_mask] ** 2)) if region1_mask.any() else 0
-    )
+    kf_rmse_region1 = np.sqrt(np.mean(abs_error_kf[region1_mask] ** 2)) if region1_mask.any() else 0
 
     if BACKWARD_EXTRAPOLATION:
         region0_name = "EXTRAPOLATION (inner radii)"
@@ -668,7 +672,7 @@ if __name__ == "__main__":
 
     summary_text = f"""
     SUMMARY STATISTICS
-    {'=' * 40}
+    {"=" * 40}
 
     {region0_name}:
     ────────────────────────────────────────
@@ -704,8 +708,7 @@ if __name__ == "__main__":
     # Create descriptive filename with KF parameters
     mode = "backward" if BACKWARD_EXTRAPOLATION else "forward"
     save_path = (
-        f"results/figures/Bessel_Ripple_KF_{mode}_"
-        f"rho{KF_RHO}_Q{KF_Q_STD:.2e}_R{KF_R_STD:.3f}.png"
+        f"results/figures/Bessel_Ripple_KF_{mode}_rho{KF_RHO}_Q{KF_Q_STD:.2e}_R{KF_R_STD:.3f}.png"
     )
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     print(f"\nFigure saved to {save_path}")

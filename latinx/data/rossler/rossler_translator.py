@@ -71,7 +71,9 @@ class RosslerTranslator:
         else:
             self.initial_state = np.asarray(initial_state, dtype=np.float64)
             if self.initial_state.shape != (3,):
-                raise ValueError(f"initial_state must have shape (3,), got {self.initial_state.shape}")
+                raise ValueError(
+                    f"initial_state must have shape (3,), got {self.initial_state.shape}"
+                )
 
         # Handle noise: use percentage if provided, otherwise use fixed std
         if noise_pct is not None:
@@ -152,21 +154,21 @@ class RosslerTranslator:
         trajectory_noisy = trajectory + noise
 
         # Create DataFrame
-        data = pd.DataFrame({
-            "t": time,
-            "x": trajectory[:, 0],
-            "y": trajectory[:, 1],
-            "z": trajectory[:, 2],
-            "x_noisy": trajectory_noisy[:, 0],
-            "y_noisy": trajectory_noisy[:, 1],
-            "z_noisy": trajectory_noisy[:, 2],
-        })
+        data = pd.DataFrame(
+            {
+                "t": time,
+                "x": trajectory[:, 0],
+                "y": trajectory[:, 1],
+                "z": trajectory[:, 2],
+                "x_noisy": trajectory_noisy[:, 0],
+                "y_noisy": trajectory_noisy[:, 1],
+                "z_noisy": trajectory_noisy[:, 2],
+            }
+        )
 
         return data
 
-    def generate_with_transient_removal(
-        self, n_transient: int = 1000
-    ) -> pd.DataFrame:
+    def generate_with_transient_removal(self, n_transient: int = 1000) -> pd.DataFrame:
         """
         Generate trajectory with initial transient removed.
 

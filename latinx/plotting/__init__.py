@@ -13,9 +13,7 @@ from latinx.plotting.bessel_ripple_plots import (
     plot_bessel_ripple_with_uncertainty,
 )
 
-from latinx.plotting.common import (
-    plot_bll_vs_full_nn
-)
+from latinx.plotting.common import plot_bll_vs_full_nn
 
 __all__ = [
     # ricker wavelet plots
@@ -28,7 +26,6 @@ __all__ = [
     "plot_bessel_ripple_3d",
     "plot_bessel_ripple_contour",
     "plot_bessel_ripple_with_uncertainty",
-
-    #common
+    # common
     "plot_bll_vs_full_nn",
 ]

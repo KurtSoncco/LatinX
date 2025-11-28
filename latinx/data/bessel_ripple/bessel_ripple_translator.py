@@ -121,7 +121,7 @@ class BesselRippleTranslator:
         r = np.sqrt(x**2 + y**2)
 
         # Handle r=0 case (Bessel j_0(0) = 1)
-        with np.errstate(invalid='ignore'):
+        with np.errstate(invalid="ignore"):
             z = np.where(r < self.epsilon, 1.0, spherical_jn(0, self.k * r))
 
         # Apply damping if specified
@@ -192,13 +192,15 @@ class BesselRippleTranslator:
         r = np.sqrt(x_flat**2 + y_flat**2)
 
         # Create DataFrame
-        data = pd.DataFrame({
-            "x": x_flat,
-            "y": y_flat,
-            "z": z_clean,
-            "z_noisy": z_noisy,
-            "r": r,
-        })
+        data = pd.DataFrame(
+            {
+                "x": x_flat,
+                "y": y_flat,
+                "z": z_clean,
+                "z_noisy": z_noisy,
+                "r": r,
+            }
+        )
 
         return data
 
@@ -261,8 +263,12 @@ class BesselRippleTranslator:
         if n_points is None:
             n_points = self.grid_size
         if r_max is None:
-            r_max = max(abs(self.x_range[0]), abs(self.x_range[1]),
-                       abs(self.y_range[0]), abs(self.y_range[1]))
+            r_max = max(
+                abs(self.x_range[0]),
+                abs(self.x_range[1]),
+                abs(self.y_range[0]),
+                abs(self.y_range[1]),
+            )
 
         # Create 1D radial grid
         r_values = np.linspace(0, r_max, n_points)
@@ -282,10 +288,12 @@ class BesselRippleTranslator:
         z_noisy = z_clean + noise
 
         # Create DataFrame
-        data = pd.DataFrame({
-            "r": r_values,
-            "z": z_clean,
-            "z_noisy": z_noisy,
-        })
+        data = pd.DataFrame(
+            {
+                "r": r_values,
+                "z": z_clean,
+                "z_noisy": z_noisy,
+            }
+        )
 
         return data

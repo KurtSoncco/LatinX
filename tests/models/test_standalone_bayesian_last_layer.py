@@ -143,12 +143,8 @@ def test_higher_alpha_increases_regularization(simple_data):
     """Test that higher alpha (prior precision) increases regularization."""
     features, y, feature_dim = simple_data
 
-    bll_low_alpha = StandaloneBayesianLastLayer(
-        sigma=0.1, alpha=0.001, feature_dim=feature_dim
-    )
-    bll_high_alpha = StandaloneBayesianLastLayer(
-        sigma=0.1, alpha=10.0, feature_dim=feature_dim
-    )
+    bll_low_alpha = StandaloneBayesianLastLayer(sigma=0.1, alpha=0.001, feature_dim=feature_dim)
+    bll_high_alpha = StandaloneBayesianLastLayer(sigma=0.1, alpha=10.0, feature_dim=feature_dim)
 
     bll_low_alpha.fit(features, y)
     bll_high_alpha.fit(features, y)
@@ -164,12 +160,8 @@ def test_lower_sigma_increases_confidence(simple_data):
     """Test that lower sigma (observation noise) increases confidence."""
     features, y, feature_dim = simple_data
 
-    bll_high_sigma = StandaloneBayesianLastLayer(
-        sigma=1.0, alpha=0.01, feature_dim=feature_dim
-    )
-    bll_low_sigma = StandaloneBayesianLastLayer(
-        sigma=0.01, alpha=0.01, feature_dim=feature_dim
-    )
+    bll_high_sigma = StandaloneBayesianLastLayer(sigma=1.0, alpha=0.01, feature_dim=feature_dim)
+    bll_low_sigma = StandaloneBayesianLastLayer(sigma=0.01, alpha=0.01, feature_dim=feature_dim)
 
     bll_high_sigma.fit(features, y)
     bll_low_sigma.fit(features, y)

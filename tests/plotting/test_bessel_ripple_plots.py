@@ -63,9 +63,7 @@ def test_plot_bessel_ripple_with_noisy_column(bessel_ripple_data):
 
 def test_plot_bessel_ripple_3d(bessel_ripple_data):
     """Test standalone 3D surface plot."""
-    fig = plot_bessel_ripple_3d(
-        bessel_ripple_data, column="z", cmap="plasma", elev=35, azim=50
-    )
+    fig = plot_bessel_ripple_3d(bessel_ripple_data, column="z", cmap="plasma", elev=35, azim=50)
 
     assert fig is not None
     assert isinstance(fig, plt.Figure)
@@ -89,9 +87,7 @@ def test_plot_bessel_ripple_contour(bessel_ripple_data):
 
 def test_plot_bessel_ripple_contour_no_lines(bessel_ripple_data):
     """Test contour plot without lines."""
-    fig = plot_bessel_ripple_contour(
-        bessel_ripple_data, column="z", show_lines=False
-    )
+    fig = plot_bessel_ripple_contour(bessel_ripple_data, column="z", show_lines=False)
 
     assert fig is not None
     plt.close(fig)
@@ -177,9 +173,7 @@ def test_plot_functions_close_properly(bessel_ripple_data, sample_predictions):
     fig1 = plot_bessel_ripple(bessel_ripple_data)
     fig2 = plot_bessel_ripple_3d(bessel_ripple_data)
     fig3 = plot_bessel_ripple_contour(bessel_ripple_data)
-    fig4 = plot_bessel_ripple_with_uncertainty(
-        bessel_ripple_data, predictions, uncertainty
-    )
+    fig4 = plot_bessel_ripple_with_uncertainty(bessel_ripple_data, predictions, uncertainty)
 
     # Close all
     plt.close(fig1)

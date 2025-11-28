@@ -106,9 +106,7 @@ class StandaloneBayesianLastLayer:
         # Validate shapes
         n_samples, M = phi_x.shape
         if M != self.feature_dim:
-            raise ValueError(
-                f"Feature dimension mismatch: expected {self.feature_dim}, got {M}"
-            )
+            raise ValueError(f"Feature dimension mismatch: expected {self.feature_dim}, got {M}")
         if len(y_arr) != n_samples:
             raise ValueError(
                 f"Number of samples mismatch: features has {n_samples}, y has {len(y_arr)}"

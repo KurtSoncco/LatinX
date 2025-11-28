@@ -1,8 +1,7 @@
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Tuple,Optional
+from typing import Tuple, Optional
 
 
 def plot_bll_vs_full_nn(
@@ -56,8 +55,7 @@ def plot_bll_vs_full_nn(
     # 1. Ground truth
     ax1 = fig.add_subplot(131, projection="3d")
     surf1 = ax1.plot_surface(
-        X, Y, Z_true, cmap=cmap, linewidth=0, antialiased=True,
-        vmin=z_min, vmax=z_max
+        X, Y, Z_true, cmap=cmap, linewidth=0, antialiased=True, vmin=z_min, vmax=z_max
     )
     ax1.set_xlabel("X", fontsize=9)
     ax1.set_ylabel("Y", fontsize=9)
@@ -69,8 +67,7 @@ def plot_bll_vs_full_nn(
     # 2. Bayesian Last Layer
     ax2 = fig.add_subplot(132, projection="3d")
     surf2 = ax2.plot_surface(
-        X, Y, Z_bll, cmap=cmap, linewidth=0, antialiased=True,
-        vmin=z_min, vmax=z_max
+        X, Y, Z_bll, cmap=cmap, linewidth=0, antialiased=True, vmin=z_min, vmax=z_max
     )
     ax2.set_xlabel("X", fontsize=9)
     ax2.set_ylabel("Y", fontsize=9)
@@ -82,8 +79,7 @@ def plot_bll_vs_full_nn(
     # 3. Full NN
     ax3 = fig.add_subplot(133, projection="3d")
     surf3 = ax3.plot_surface(
-        X, Y, Z_nn, cmap=cmap, linewidth=0, antialiased=True,
-        vmin=z_min, vmax=z_max
+        X, Y, Z_nn, cmap=cmap, linewidth=0, antialiased=True, vmin=z_min, vmax=z_max
     )
     ax3.set_xlabel("X", fontsize=9)
     ax3.set_ylabel("Y", fontsize=9)

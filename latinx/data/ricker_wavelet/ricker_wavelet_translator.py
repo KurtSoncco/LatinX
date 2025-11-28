@@ -116,13 +116,15 @@ class RickerWaveletTranslator:
         r = np.sqrt(x_flat**2 + y_flat**2)
 
         # Create DataFrame
-        data = pd.DataFrame({
-            "x": x_flat,
-            "y": y_flat,
-            "z": z_clean,
-            "z_noisy": z_noisy,
-            "r": r,
-        })
+        data = pd.DataFrame(
+            {
+                "x": x_flat,
+                "y": y_flat,
+                "z": z_clean,
+                "z_noisy": z_noisy,
+                "r": r,
+            }
+        )
 
         return data
 

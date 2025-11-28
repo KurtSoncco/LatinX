@@ -19,7 +19,7 @@ from latinx.plotting import (
     plot_bessel_ripple_3d,
     plot_bessel_ripple_contour,
     plot_bessel_ripple_with_uncertainty,
-    plot_bll_vs_full_nn
+    plot_bll_vs_full_nn,
 )
 
 
@@ -134,7 +134,7 @@ def main():
     loss_history = bll.fit(X, y_target)
     print(f"Initial loss: {loss_history[0]:.6f}")
     print(f"Final loss: {loss_history[-1]:.6f}")
-    print(f"Loss reduction: {(1 - loss_history[-1]/loss_history[0])*100:.2f}%")
+    print(f"Loss reduction: {(1 - loss_history[-1] / loss_history[0]) * 100:.2f}%")
 
     # 8. Make predictions
     print("\n" + "=" * 60)
@@ -174,7 +174,7 @@ def main():
 
     print("\n11. Creating BLL vs Full NN comparison plot...")
     y_pred_nn = bll.predict_full_nn(X)
-    rmse_full_nn = np.sqrt((np.mean(y_target- y_pred_nn)**2))
+    rmse_full_nn = np.sqrt((np.mean(y_target - y_pred_nn) ** 2))
 
     fig_comparison_bessel = plot_bll_vs_full_nn(
         data=data,

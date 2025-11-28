@@ -155,9 +155,7 @@ def run_multiout_kf_with_updates(
         xyz_obs = xyz_noisy[t]  # (3,)
 
         # Extract features using frozen RNN
-        input_tensor = torch.tensor(
-            np.array(input_buffer), dtype=torch.float32
-        ).view(1, seq_len, 1)
+        input_tensor = torch.tensor(np.array(input_buffer), dtype=torch.float32).view(1, seq_len, 1)
 
         with torch.no_grad():
             features_tensor, _ = rnn_model(input_tensor)
@@ -222,9 +220,7 @@ def run_multiout_kf_prediction_only(
         xyz_true = xyz_clean[t]
         xyz_obs = xyz_noisy[t]
 
-        input_tensor = torch.tensor(
-            np.array(input_buffer), dtype=torch.float32
-        ).view(1, seq_len, 1)
+        input_tensor = torch.tensor(np.array(input_buffer), dtype=torch.float32).view(1, seq_len, 1)
 
         with torch.no_grad():
             features_tensor, _ = rnn_model(input_tensor)
@@ -351,11 +347,9 @@ if __name__ == "__main__":
     input_values = task0["x_noisy"]
 
     # Target is all 3 dimensions (x, y, z)
-    target_xyz = np.stack([
-        task0["x_noisy"],
-        task0["y_noisy"],
-        task0["z_noisy"]
-    ], axis=1)  # Shape: (N, 3)
+    target_xyz = np.stack(
+        [task0["x_noisy"], task0["y_noisy"], task0["z_noisy"]], axis=1
+    )  # Shape: (N, 3)
 
     # Create training sequences
     inputs = []
@@ -409,18 +403,22 @@ if __name__ == "__main__":
         output_dim=3,  # Predict x, y, z
         rho=KF_RHO,
         Q_std=KF_Q_STD,
-        R_std=KF_R_STD
+        R_std=KF_R_STD,
     )
 
     # Prepare data as (N, 3) arrays
     t_values = task0["t"]
     xyz_clean_task0 = np.stack([task0["x"], task0["y"], task0["z"]], axis=1)  # (N, 3)
-    xyz_noisy_task0 = np.stack([task0["x_noisy"], task0["y_noisy"], task0["z_noisy"]], axis=1)  # (N, 3)
+    xyz_noisy_task0 = np.stack(
+        [task0["x_noisy"], task0["y_noisy"], task0["z_noisy"]], axis=1
+    )  # (N, 3)
 
     # Task 1 data
     task1 = task_data[1]
     xyz_clean_task1 = np.stack([task1["x"], task1["y"], task1["z"]], axis=1)  # (N, 3)
-    xyz_noisy_task1 = np.stack([task1["x_noisy"], task1["y_noisy"], task1["z_noisy"]], axis=1)  # (N, 3)
+    xyz_noisy_task1 = np.stack(
+        [task1["x_noisy"], task1["y_noisy"], task1["z_noisy"]], axis=1
+    )  # (N, 3)
 
     print("\n" + "=" * 60)
     print("PHASE 2: Online Kalman Filter Adaptation (3D Multi-Output)")
@@ -428,22 +426,31 @@ if __name__ == "__main__":
 
     print(f"\nStep 1: Training KF on Task 0 (first half, {SWITCH_POINT} points)")
     print(f"Task 0: {TASK_CONFIGS[0]['label']}")
-    print(f"Parameters: a={TASK_CONFIGS[0]['a']}, b={TASK_CONFIGS[0]['b']}, c={TASK_CONFIGS[0]['c']}")
+    print(
+        f"Parameters: a={TASK_CONFIGS[0]['a']}, b={TASK_CONFIGS[0]['b']}, c={TASK_CONFIGS[0]['c']}"
+    )
 
     # Train KF on first half of Task 0
     results_train = run_multiout_kf_with_updates(
-        kf, rnn_model, t_values, xyz_clean_task0, xyz_noisy_task0,
-        0, SWITCH_POINT, SEQ_LEN
+        kf, rnn_model, t_values, xyz_clean_task0, xyz_noisy_task0, 0, SWITCH_POINT, SEQ_LEN
     )
 
     print(f"\nStep 2: Testing KF on Task 1 (different dynamics)")
     print(f"Task 1: {TASK_CONFIGS[1]['label']}")
-    print(f"Parameters: a={TASK_CONFIGS[1]['a']}, b={TASK_CONFIGS[1]['b']}, c={TASK_CONFIGS[1]['c']}")
+    print(
+        f"Parameters: a={TASK_CONFIGS[1]['a']}, b={TASK_CONFIGS[1]['b']}, c={TASK_CONFIGS[1]['c']}"
+    )
 
     # Test KF on Task 1 (prediction only)
     results_test = run_multiout_kf_prediction_only(
-        kf, rnn_model, task1["t"], xyz_clean_task1, xyz_noisy_task1,
-        0, len(xyz_clean_task1), SEQ_LEN
+        kf,
+        rnn_model,
+        task1["t"],
+        xyz_clean_task1,
+        xyz_noisy_task1,
+        0,
+        len(xyz_clean_task1),
+        SEQ_LEN,
     )
 
     # Combine results for plotting
@@ -505,58 +512,112 @@ if __name__ == "__main__":
     # =================================================================
 
     # Plot 1: Ground Truth 3D Trajectory (Task 0 + Task 1)
-    ax1 = fig.add_subplot(2, 4, 1, projection='3d')
-    ax1.plot(xyz_true[:split_point, 0], xyz_true[:split_point, 1], xyz_true[:split_point, 2],
-             linewidth=0.8, alpha=0.8, label='Task 0', color='blue')
-    ax1.plot(xyz_true[split_point:, 0], xyz_true[split_point:, 1], xyz_true[split_point:, 2],
-             linewidth=0.8, alpha=0.8, label='Task 1', color='orange')
-    ax1.set_xlabel('X')
-    ax1.set_ylabel('Y')
-    ax1.set_zlabel('Z')
-    ax1.set_title('Ground Truth Trajectories')
+    ax1 = fig.add_subplot(2, 4, 1, projection="3d")
+    ax1.plot(
+        xyz_true[:split_point, 0],
+        xyz_true[:split_point, 1],
+        xyz_true[:split_point, 2],
+        linewidth=0.8,
+        alpha=0.8,
+        label="Task 0",
+        color="blue",
+    )
+    ax1.plot(
+        xyz_true[split_point:, 0],
+        xyz_true[split_point:, 1],
+        xyz_true[split_point:, 2],
+        linewidth=0.8,
+        alpha=0.8,
+        label="Task 1",
+        color="orange",
+    )
+    ax1.set_xlabel("X")
+    ax1.set_ylabel("Y")
+    ax1.set_zlabel("Z")
+    ax1.set_title("Ground Truth Trajectories")
     ax1.legend(fontsize=8)
 
     # Plot 2: KF Predicted 3D Trajectory
-    ax2 = fig.add_subplot(2, 4, 2, projection='3d')
-    ax2.plot(xyz_pred_kf[:split_point, 0], xyz_pred_kf[:split_point, 1], xyz_pred_kf[:split_point, 2],
-             linewidth=0.8, alpha=0.8, label='Task 0', color='blue')
-    ax2.plot(xyz_pred_kf[split_point:, 0], xyz_pred_kf[split_point:, 1], xyz_pred_kf[split_point:, 2],
-             linewidth=0.8, alpha=0.8, label='Task 1', color='orange')
-    ax2.set_xlabel('X')
-    ax2.set_ylabel('Y')
-    ax2.set_zlabel('Z')
-    ax2.set_title('KF Predicted Trajectories')
+    ax2 = fig.add_subplot(2, 4, 2, projection="3d")
+    ax2.plot(
+        xyz_pred_kf[:split_point, 0],
+        xyz_pred_kf[:split_point, 1],
+        xyz_pred_kf[:split_point, 2],
+        linewidth=0.8,
+        alpha=0.8,
+        label="Task 0",
+        color="blue",
+    )
+    ax2.plot(
+        xyz_pred_kf[split_point:, 0],
+        xyz_pred_kf[split_point:, 1],
+        xyz_pred_kf[split_point:, 2],
+        linewidth=0.8,
+        alpha=0.8,
+        label="Task 1",
+        color="orange",
+    )
+    ax2.set_xlabel("X")
+    ax2.set_ylabel("Y")
+    ax2.set_zlabel("Z")
+    ax2.set_title("KF Predicted Trajectories")
     ax2.legend(fontsize=8)
 
     # Plot 3: Overlay - Ground Truth vs KF Prediction
-    ax3 = fig.add_subplot(2, 4, 3, projection='3d')
-    ax3.plot(xyz_true[:, 0], xyz_true[:, 1], xyz_true[:, 2],
-             linewidth=0.6, alpha=0.5, label='Ground Truth', color='blue')
-    ax3.plot(xyz_pred_kf[:, 0], xyz_pred_kf[:, 1], xyz_pred_kf[:, 2],
-             linewidth=0.6, alpha=0.7, label='KF Prediction', color='red', linestyle='--')
-    ax3.set_xlabel('X')
-    ax3.set_ylabel('Y')
-    ax3.set_zlabel('Z')
-    ax3.set_title('Truth vs KF Prediction (Overlay)')
+    ax3 = fig.add_subplot(2, 4, 3, projection="3d")
+    ax3.plot(
+        xyz_true[:, 0],
+        xyz_true[:, 1],
+        xyz_true[:, 2],
+        linewidth=0.6,
+        alpha=0.5,
+        label="Ground Truth",
+        color="blue",
+    )
+    ax3.plot(
+        xyz_pred_kf[:, 0],
+        xyz_pred_kf[:, 1],
+        xyz_pred_kf[:, 2],
+        linewidth=0.6,
+        alpha=0.7,
+        label="KF Prediction",
+        color="red",
+        linestyle="--",
+    )
+    ax3.set_xlabel("X")
+    ax3.set_ylabel("Y")
+    ax3.set_zlabel("Z")
+    ax3.set_title("Truth vs KF Prediction (Overlay)")
     ax3.legend(fontsize=8)
 
     # Plot 4: 3D Prediction Error Vectors (sampled)
-    ax4 = fig.add_subplot(2, 4, 4, projection='3d')
+    ax4 = fig.add_subplot(2, 4, 4, projection="3d")
     # Sample every 10th point to avoid clutter
     sample_idx = np.arange(0, len(xyz_true), 10)
     errors_3d = xyz_true - xyz_pred_kf
-    ax4.scatter(xyz_true[sample_idx, 0], xyz_true[sample_idx, 1], xyz_true[sample_idx, 2],
-                c='blue', s=5, alpha=0.3, label='True Position')
+    ax4.scatter(
+        xyz_true[sample_idx, 0],
+        xyz_true[sample_idx, 1],
+        xyz_true[sample_idx, 2],
+        c="blue",
+        s=5,
+        alpha=0.3,
+        label="True Position",
+    )
     # Draw error vectors
     for idx in sample_idx[::5]:  # Further subsample for vectors
-        ax4.plot([xyz_true[idx, 0], xyz_pred_kf[idx, 0]],
-                [xyz_true[idx, 1], xyz_pred_kf[idx, 1]],
-                [xyz_true[idx, 2], xyz_pred_kf[idx, 2]],
-                'r-', alpha=0.3, linewidth=0.5)
-    ax4.set_xlabel('X')
-    ax4.set_ylabel('Y')
-    ax4.set_zlabel('Z')
-    ax4.set_title('Prediction Errors (Red Lines)')
+        ax4.plot(
+            [xyz_true[idx, 0], xyz_pred_kf[idx, 0]],
+            [xyz_true[idx, 1], xyz_pred_kf[idx, 1]],
+            [xyz_true[idx, 2], xyz_pred_kf[idx, 2]],
+            "r-",
+            alpha=0.3,
+            linewidth=0.5,
+        )
+    ax4.set_xlabel("X")
+    ax4.set_ylabel("Y")
+    ax4.set_zlabel("Z")
+    ax4.set_title("Prediction Errors (Red Lines)")
 
     # =================================================================
     # ROW 2: PER-DIMENSION TIME SERIES
@@ -564,40 +625,46 @@ if __name__ == "__main__":
 
     # Plot 5: X Dimension - Time Series
     ax5 = fig.add_subplot(2, 4, 5)
-    ax5.plot(t_axis, xyz_true[:, 0], 'b-', linewidth=1, alpha=0.7, label='Ground Truth')
-    ax5.plot(t_axis, xyz_pred_kf[:, 0], 'r--', linewidth=1, alpha=0.8, label='KF Prediction')
-    ax5.axvline(x=t_axis[split_point], color='green', linestyle=':', linewidth=2, label='Task Switch')
-    ax5.set_xlabel('Time')
-    ax5.set_ylabel('X')
-    ax5.set_title('X Coordinate: Truth vs KF')
+    ax5.plot(t_axis, xyz_true[:, 0], "b-", linewidth=1, alpha=0.7, label="Ground Truth")
+    ax5.plot(t_axis, xyz_pred_kf[:, 0], "r--", linewidth=1, alpha=0.8, label="KF Prediction")
+    ax5.axvline(
+        x=t_axis[split_point], color="green", linestyle=":", linewidth=2, label="Task Switch"
+    )
+    ax5.set_xlabel("Time")
+    ax5.set_ylabel("X")
+    ax5.set_title("X Coordinate: Truth vs KF")
     ax5.legend(fontsize=7)
     ax5.grid(True, alpha=0.3)
 
     # Plot 6: Y Dimension - Time Series
     ax6 = fig.add_subplot(2, 4, 6)
-    ax6.plot(t_axis, xyz_true[:, 1], 'b-', linewidth=1, alpha=0.7, label='Ground Truth')
-    ax6.plot(t_axis, xyz_pred_kf[:, 1], 'r--', linewidth=1, alpha=0.8, label='KF Prediction')
-    ax6.axvline(x=t_axis[split_point], color='green', linestyle=':', linewidth=2, label='Task Switch')
-    ax6.set_xlabel('Time')
-    ax6.set_ylabel('Y')
-    ax6.set_title('Y Coordinate: Truth vs KF')
+    ax6.plot(t_axis, xyz_true[:, 1], "b-", linewidth=1, alpha=0.7, label="Ground Truth")
+    ax6.plot(t_axis, xyz_pred_kf[:, 1], "r--", linewidth=1, alpha=0.8, label="KF Prediction")
+    ax6.axvline(
+        x=t_axis[split_point], color="green", linestyle=":", linewidth=2, label="Task Switch"
+    )
+    ax6.set_xlabel("Time")
+    ax6.set_ylabel("Y")
+    ax6.set_title("Y Coordinate: Truth vs KF")
     ax6.legend(fontsize=7)
     ax6.grid(True, alpha=0.3)
 
     # Plot 7: Z Dimension - Time Series
     ax7 = fig.add_subplot(2, 4, 7)
-    ax7.plot(t_axis, xyz_true[:, 2], 'b-', linewidth=1, alpha=0.7, label='Ground Truth')
-    ax7.plot(t_axis, xyz_pred_kf[:, 2], 'r--', linewidth=1, alpha=0.8, label='KF Prediction')
-    ax7.axvline(x=t_axis[split_point], color='green', linestyle=':', linewidth=2, label='Task Switch')
-    ax7.set_xlabel('Time')
-    ax7.set_ylabel('Z')
-    ax7.set_title('Z Coordinate: Truth vs KF')
+    ax7.plot(t_axis, xyz_true[:, 2], "b-", linewidth=1, alpha=0.7, label="Ground Truth")
+    ax7.plot(t_axis, xyz_pred_kf[:, 2], "r--", linewidth=1, alpha=0.8, label="KF Prediction")
+    ax7.axvline(
+        x=t_axis[split_point], color="green", linestyle=":", linewidth=2, label="Task Switch"
+    )
+    ax7.set_xlabel("Time")
+    ax7.set_ylabel("Z")
+    ax7.set_title("Z Coordinate: Truth vs KF")
     ax7.legend(fontsize=7)
     ax7.grid(True, alpha=0.3)
 
     # Plot 8: Summary Statistics
     ax8 = fig.add_subplot(2, 4, 8)
-    ax8.axis('off')
+    ax8.axis("off")
 
     # Compute per-dimension errors
     errors_3d = xyz_true - xyz_pred_kf
@@ -609,12 +676,12 @@ if __name__ == "__main__":
     # Task-specific statistics
     task0_error_norm = np.mean(error_norm[:split_point])
     task1_error_norm = np.mean(error_norm[split_point:])
-    task0_rmse_x = np.sqrt(np.mean(error_x[:split_point]**2))
-    task1_rmse_x = np.sqrt(np.mean(error_x[split_point:]**2))
-    task0_rmse_y = np.sqrt(np.mean(error_y[:split_point]**2))
-    task1_rmse_y = np.sqrt(np.mean(error_y[split_point:]**2))
-    task0_rmse_z = np.sqrt(np.mean(error_z[:split_point]**2))
-    task1_rmse_z = np.sqrt(np.mean(error_z[split_point:]**2))
+    task0_rmse_x = np.sqrt(np.mean(error_x[:split_point] ** 2))
+    task1_rmse_x = np.sqrt(np.mean(error_x[split_point:] ** 2))
+    task0_rmse_y = np.sqrt(np.mean(error_y[:split_point] ** 2))
+    task1_rmse_y = np.sqrt(np.mean(error_y[split_point:] ** 2))
+    task0_rmse_z = np.sqrt(np.mean(error_z[:split_point] ** 2))
+    task1_rmse_z = np.sqrt(np.mean(error_z[split_point:] ** 2))
 
     summary_text = f"""
 3D MULTI-OUTPUT KF PERFORMANCE
@@ -631,18 +698,25 @@ Task 1 (Testing):
   RMSE Y: {task1_rmse_y:.4f}
   RMSE Z: {task1_rmse_z:.4f}
 
-Error Increase: {(task1_error_norm/task0_error_norm - 1)*100:.1f}%
+Error Increase: {(task1_error_norm / task0_error_norm - 1) * 100:.1f}%
 
 Trace(P) Range: [{trace_P.min():.2e}, {trace_P.max():.2e}]
     """
 
-    ax8.text(0.1, 0.5, summary_text, transform=ax8.transAxes,
-            fontsize=9, verticalalignment='center',
-            bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5),
-            family='monospace')
+    ax8.text(
+        0.1,
+        0.5,
+        summary_text,
+        transform=ax8.transAxes,
+        fontsize=9,
+        verticalalignment="center",
+        bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.5),
+        family="monospace",
+    )
 
-    plt.suptitle(f"Rössler 3D Multi-Output KF: Ground Truth vs Predictions",
-                 fontsize=14, fontweight='bold')
+    plt.suptitle(
+        f"Rössler 3D Multi-Output KF: Ground Truth vs Predictions", fontsize=14, fontweight="bold"
+    )
     plt.tight_layout()
 
     # Save figure
@@ -656,8 +730,8 @@ Trace(P) Range: [{trace_P.min():.2e}, {trace_P.max():.2e}]
     # =================================================================
     fig2 = plt.figure(figsize=(18, 10))
 
-    dim_names = ['X', 'Y', 'Z']
-    dim_colors = ['red', 'green', 'blue']
+    dim_names = ["X", "Y", "Z"]
+    dim_colors = ["red", "green", "blue"]
 
     for dim_idx in range(3):
         ax = fig2.add_subplot(3, 1, dim_idx + 1)
@@ -667,27 +741,51 @@ Trace(P) Range: [{trace_P.min():.2e}, {trace_P.max():.2e}]
         sigma_3 = 3 * sigma
 
         # Plot 1-sigma (uncertainty)
-        ax.plot(t_axis, sigma, color=dim_colors[dim_idx], linewidth=2,
-                alpha=0.8, label='σ (1-sigma)', zorder=2)
+        ax.plot(
+            t_axis,
+            sigma,
+            color=dim_colors[dim_idx],
+            linewidth=2,
+            alpha=0.8,
+            label="σ (1-sigma)",
+            zorder=2,
+        )
 
         # Plot 3-sigma bounds
-        ax.plot(t_axis, sigma_3, color=dim_colors[dim_idx], linewidth=1.5,
-                alpha=0.6, label='3σ (99.7% confidence)', linestyle='--', zorder=1)
+        ax.plot(
+            t_axis,
+            sigma_3,
+            color=dim_colors[dim_idx],
+            linewidth=1.5,
+            alpha=0.6,
+            label="3σ (99.7% confidence)",
+            linestyle="--",
+            zorder=1,
+        )
 
         # Fill between sigma and 3*sigma
-        ax.fill_between(t_axis, sigma, sigma_3,
-                        color=dim_colors[dim_idx], alpha=0.15, zorder=0)
+        ax.fill_between(t_axis, sigma, sigma_3, color=dim_colors[dim_idx], alpha=0.15, zorder=0)
 
         # Task switch line
-        ax.axvline(x=t_axis[split_point], color='orange', linestyle=':',
-                  linewidth=2.5, label='Task Switch', alpha=0.8, zorder=3)
+        ax.axvline(
+            x=t_axis[split_point],
+            color="orange",
+            linestyle=":",
+            linewidth=2.5,
+            label="Task Switch",
+            alpha=0.8,
+            zorder=3,
+        )
 
         # Labels and formatting
-        ax.set_xlabel('Time', fontsize=11)
-        ax.set_ylabel('Uncertainty', fontsize=11)
-        ax.set_title(f'{dim_names[dim_idx]} Dimension: Uncertainty Evolution (σ and 3σ)',
-                    fontsize=12, fontweight='bold')
-        ax.legend(loc='upper right', fontsize=10)
+        ax.set_xlabel("Time", fontsize=11)
+        ax.set_ylabel("Uncertainty", fontsize=11)
+        ax.set_title(
+            f"{dim_names[dim_idx]} Dimension: Uncertainty Evolution (σ and 3σ)",
+            fontsize=12,
+            fontweight="bold",
+        )
+        ax.legend(loc="upper right", fontsize=10)
         ax.grid(True, alpha=0.3)
 
         # Compute statistics
@@ -697,18 +795,30 @@ Trace(P) Range: [{trace_P.min():.2e}, {trace_P.max():.2e}]
         max_sigma_task1 = np.max(sigma[split_point:])
 
         # Add text box with statistics
-        stats_text = f'Task 0: mean σ={mean_sigma_task0:.4f}, max σ={max_sigma_task0:.4f}\n'
-        stats_text += f'Task 1: mean σ={mean_sigma_task1:.4f}, max σ={max_sigma_task1:.4f}'
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
-               fontsize=9, verticalalignment='top', horizontalalignment='left',
-               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        stats_text = f"Task 0: mean σ={mean_sigma_task0:.4f}, max σ={max_sigma_task0:.4f}\n"
+        stats_text += f"Task 1: mean σ={mean_sigma_task1:.4f}, max σ={max_sigma_task1:.4f}"
+        ax.text(
+            0.02,
+            0.98,
+            stats_text,
+            transform=ax.transAxes,
+            fontsize=9,
+            verticalalignment="top",
+            horizontalalignment="left",
+            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+        )
 
-    plt.suptitle('Predictive Uncertainty Evolution: σ and 3σ Bounds Over Time',
-                fontsize=14, fontweight='bold')
+    plt.suptitle(
+        "Predictive Uncertainty Evolution: σ and 3σ Bounds Over Time",
+        fontsize=14,
+        fontweight="bold",
+    )
     plt.tight_layout()
 
     # Save uncertainty figure
-    save_path2 = f"results/figures/Rossler_3D_KF_Uncertainty_rho{KF_RHO}_Q{KF_Q_STD:.2e}_R{KF_R_STD:.3f}.png"
+    save_path2 = (
+        f"results/figures/Rossler_3D_KF_Uncertainty_rho{KF_RHO}_Q{KF_Q_STD:.2e}_R{KF_R_STD:.3f}.png"
+    )
     plt.savefig(save_path2, dpi=150, bbox_inches="tight")
     print(f"Figure 2 saved to: {save_path2}")
 
