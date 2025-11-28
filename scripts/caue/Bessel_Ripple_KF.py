@@ -41,6 +41,12 @@ from latinx.metrics.metrics_kalman_filter import innovation, trace_covariance
 from latinx.models.kalman_filter import KalmanFilterHead
 from latinx.models.rnn import SimpleRNN
 from latinx.models.standalone_bayesian_last_layer import StandaloneBayesianLastLayer
+from latinx.models.bll_utils import (
+    run_bll_training,
+    run_bll_prediction_only,
+    combine_bll_results,
+    plot_bll_results,
+)
 
 # ==========================================
 # HELPER FUNCTIONS FOR KF PROCESSING
@@ -247,194 +253,6 @@ def combine_results(*results_list) -> dict[str, np.ndarray]:
             combined[key].extend(results[key])
 
     # Convert to numpy arrays
-    return {key: np.array(val) for key, val in combined.items()}
-
-
-# ==========================================
-# HELPER FUNCTIONS FOR BLL PROCESSING
-# ==========================================
-
-
-def extract_features_and_targets(
-    rnn_model: nn.Module,
-    r_values: np.ndarray,
-    z_clean: np.ndarray,
-    z_noisy: np.ndarray,
-    start_idx: int,
-    end_idx: int,
-    seq_len: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Extract features from frozen RNN for all data points in range.
-
-    Returns:
-        Tuple of (features, r_vals, z_true_vals, z_noisy_vals)
-    """
-    features_list = []
-    r_list = []
-    z_true_list = []
-    z_noisy_list = []
-
-    # Ensure we don't exceed array bounds
-    actual_end_idx = min(end_idx, len(r_values), len(z_clean), len(z_noisy))
-
-    # Initialize buffer
-    input_buffer = deque(maxlen=seq_len)
-    for i in range(seq_len):
-        idx = start_idx + i
-        if idx < actual_end_idx:
-            input_buffer.append(z_noisy[idx])
-
-    # Process all data points
-    for t in range(start_idx + seq_len, actual_end_idx):
-        r_t = r_values[t]
-        z_true = z_clean[t]
-        z_noisy_t = z_noisy[t]
-
-        # Extract features using frozen RNN
-        input_tensor = torch.tensor(np.array(input_buffer), dtype=torch.float32).view(1, seq_len, 1)
-
-        with torch.no_grad():
-            features_tensor, _ = rnn_model(input_tensor)
-
-        # Convert to numpy
-        features = features_tensor.detach().numpy().squeeze()
-        features_list.append(features)
-        r_list.append(r_t)
-        z_true_list.append(z_true)
-        z_noisy_list.append(z_noisy_t)
-
-        # Update buffer
-        input_buffer.append(z_noisy_t)
-
-    return (
-        np.array(features_list),
-        np.array(r_list),
-        np.array(z_true_list),
-        np.array(z_noisy_list),
-    )
-
-
-def run_bll_training(
-    bll_model: StandaloneBayesianLastLayer,
-    rnn_model: nn.Module,
-    r_values: np.ndarray,
-    z_clean: np.ndarray,
-    z_noisy: np.ndarray,
-    start_idx: int,
-    end_idx: int,
-    seq_len: int,
-) -> dict[str, np.ndarray]:
-    """
-    Train BLL with batch fitting (not incremental).
-
-    BLL is fitted ONCE on all training data, then used to make predictions.
-    This is more stable than incremental refitting.
-    """
-    # Step 1: Extract ALL features and targets first
-    print(f"  DEBUG: start_idx={start_idx}, end_idx={end_idx}, seq_len={seq_len}")
-    print(f"  DEBUG: Array lengths: r_values={len(r_values)}, z_clean={len(z_clean)}, z_noisy={len(z_noisy)}")
-    print(f"  DEBUG: Expected samples: {end_idx - start_idx - seq_len}")
-    features, r_vals, z_true_vals, z_noisy_vals = extract_features_and_targets(
-        rnn_model, r_values, z_clean, z_noisy, start_idx, end_idx, seq_len
-    )
-
-    # Step 2: Fit BLL ONCE on all training data
-    print(f"  Fitting BLL on {len(features)} training samples (batch mode)...")
-    print(f"  DEBUG: r range: [{r_vals[0]:.3f}, {r_vals[-1]:.3f}]")
-    print(f"  DEBUG: z_noisy range: [{np.min(z_noisy_vals):.3f}, {np.max(z_noisy_vals):.3f}]")
-    print(f"  DEBUG: z_true range: [{np.min(z_true_vals):.3f}, {np.max(z_true_vals):.3f}]")
-    print(f"  DEBUG: features shape: {features.shape}")
-    bll_model.fit(features, z_noisy_vals)
-
-    # Step 3: Make predictions with the fitted model
-    print(f"  Making training predictions with fitted BLL...")
-    z_pred_bll, sigma_bll = bll_model.predict(features, return_std=True)
-    z_pred_bll = np.array(z_pred_bll)
-    sigma_bll = np.array(sigma_bll)
-    print(f"  DEBUG: z_pred range: [{np.min(z_pred_bll):.3f}, {np.max(z_pred_bll):.3f}]")
-    print(f"  DEBUG: sigma range: [{np.min(sigma_bll):.3f}, {np.max(sigma_bll):.3f}]")
-
-    # Step 4: Compute residuals
-    innovation = z_true_vals - z_pred_bll
-    innovation_sq = innovation**2
-    trace_P = np.full(len(r_vals), bll_model.get_total_uncertainty())
-    print(f"  DEBUG: Training RMSE: {np.sqrt(np.mean(innovation**2)):.4f}")
-
-    return {
-        "r": r_vals,
-        "z_true": z_true_vals,
-        "z_noisy": z_noisy_vals,
-        "z_pred_bll": z_pred_bll,
-        "sigma_bll": sigma_bll,
-        "innovation": innovation,
-        "innovation_sq": innovation_sq,
-        "trace_P": trace_P,
-    }
-
-
-def run_bll_prediction_only(
-    bll_model: StandaloneBayesianLastLayer,
-    rnn_model: nn.Module,
-    r_values: np.ndarray,
-    z_clean: np.ndarray,
-    z_noisy: np.ndarray,
-    start_idx: int,
-    end_idx: int,
-    seq_len: int,
-) -> dict[str, np.ndarray]:
-    """Make predictions using already-fitted BLL (no retraining)."""
-    features, r_vals, z_true_vals, z_noisy_vals = extract_features_and_targets(
-        rnn_model, r_values, z_clean, z_noisy, start_idx, end_idx, seq_len
-    )
-
-    # Predict with frozen BLL
-    print(f"  Predicting on {len(features)} samples (BLL frozen)...")
-    print(f"  DEBUG: r range: [{r_vals[0]:.3f}, {r_vals[-1]:.3f}]")
-    print(f"  DEBUG: z_noisy range: [{np.min(z_noisy_vals):.3f}, {np.max(z_noisy_vals):.3f}]")
-    print(f"  DEBUG: z_true range: [{np.min(z_true_vals):.3f}, {np.max(z_true_vals):.3f}]")
-    print(f"  DEBUG: features shape: {features.shape}")
-    z_pred_bll, sigma_bll = bll_model.predict(features, return_std=True)
-    z_pred_bll = np.array(z_pred_bll)
-    sigma_bll = np.array(sigma_bll)
-    print(f"  DEBUG: z_pred range: [{np.min(z_pred_bll):.3f}, {np.max(z_pred_bll):.3f}]")
-    print(f"  DEBUG: sigma range: [{np.min(sigma_bll):.3f}, {np.max(sigma_bll):.3f}]")
-
-    # Compute residuals
-    innovation = z_true_vals - z_pred_bll
-    innovation_sq = innovation**2
-    trace_P = np.full(len(r_vals), bll_model.get_total_uncertainty())
-    print(f"  DEBUG: Testing RMSE: {np.sqrt(np.mean(innovation**2)):.4f}")
-
-    return {
-        "r": r_vals,
-        "z_true": z_true_vals,
-        "z_noisy": z_noisy_vals,
-        "z_pred_bll": z_pred_bll,
-        "sigma_bll": sigma_bll,
-        "innovation": innovation,
-        "innovation_sq": innovation_sq,
-        "trace_P": trace_P,
-    }
-
-
-def combine_bll_results(*results_list) -> dict[str, np.ndarray]:
-    """Combine BLL result dictionaries."""
-    combined = {
-        "r": [],
-        "z_true": [],
-        "z_noisy": [],
-        "z_pred_bll": [],
-        "sigma_bll": [],
-        "innovation": [],
-        "innovation_sq": [],
-        "trace_P": [],
-    }
-
-    for results in results_list:
-        for key in combined.keys():
-            combined[key].extend(results[key])
-
     return {key: np.array(val) for key, val in combined.items()}
 
 
@@ -919,14 +737,19 @@ if __name__ == "__main__":
     # Initialize Bayesian Last Layer
     bll = StandaloneBayesianLastLayer(sigma=BLL_SIGMA, alpha=BLL_ALPHA, feature_dim=HIDDEN_SIZE)
 
-    # Use same data as KF experiment
+    # Fetch fresh Task 0 data for BLL (avoid using modified variables from KF experiment)
+    task0_bll = task_data[0]
+    r_values_task0_bll = task0_bll["r"]
+    z_clean_task0_bll = task0_bll["z"]
+    z_noisy_task0_bll = task0_bll["z_noisy"]
+
     if BACKWARD_EXTRAPOLATION:
         print("\nStep 1: Training BLL on SECOND HALF of Task 0 (outer radii, amplitude=5.0)")
-        print(f"  Indices: [{SWITCH_POINT}, {len(r_values)})")
+        print(f"  Indices: [{SWITCH_POINT}, {len(r_values_task0_bll)})")
 
         # Train BLL on second half of Task 0
         bll_results_train = run_bll_training(
-            bll, rnn_model, r_values, z_clean, z_noisy, SWITCH_POINT, len(r_values), SEQ_LEN
+            bll, rnn_model, r_values_task0_bll, z_clean_task0_bll, z_noisy_task0_bll, SWITCH_POINT, len(r_values_task0_bll), SEQ_LEN
         )
 
         print("\nStep 2: Testing BLL on FIRST HALF of Task 1 (inner radii - BACKWARD + NEW TASK)")
@@ -957,9 +780,9 @@ if __name__ == "__main__":
         print("\nStep 1: Training BLL on FIRST HALF (Task 0)")
         print(f"  Indices: [0, {SWITCH_POINT})")
 
-        # Train BLL on first half
+        # Train BLL on first half of Task 0
         bll_results_train = run_bll_training(
-            bll, rnn_model, r_values, z_clean, z_noisy, 0, SWITCH_POINT, SEQ_LEN
+            bll, rnn_model, r_values_task0_bll, z_clean_task0_bll, z_noisy_task0_bll, 0, SWITCH_POINT, SEQ_LEN
         )
 
         print("\nStep 2: Testing BLL on SECOND HALF (Task 1)")
@@ -994,229 +817,23 @@ if __name__ == "__main__":
     print("Generating BLL visualizations...")
     print("=" * 70)
 
-    # Extract BLL results
-    r_axis_bll = bll_results["r"]
-    z_true_bll = bll_results["z_true"]
-    z_noisy_bll = bll_results["z_noisy"]
-    z_pred_bll = bll_results["z_pred_bll"]
-    sigma_bll = bll_results["sigma_bll"]
-    innovation_sq_bll = bll_results["innovation_sq"]
-    trace_P_bll = bll_results["trace_P"]
-
-    # Create comprehensive BLL figure (separate window)
-    fig_bll = plt.figure(figsize=(18, 14))
-
-    # Find switch point
-    if BACKWARD_EXTRAPOLATION:
-        # In backward mode: task 1 first, then task 0. Find transition from 1→0
-        switch_idx_bll = np.where(bll_task_ids == 0)[0][0] if 0 in bll_task_ids else len(r_axis_bll)
-    else:
-        # In normal mode: task 0 first, then task 1. Find transition from 0→1
-        switch_idx_bll = np.where(bll_task_ids == 1)[0][0] if 1 in bll_task_ids else len(r_axis_bll)
-    switch_r_bll = r_axis_bll[switch_idx_bll] if switch_idx_bll < len(r_axis_bll) else r_axis_bll[-1]
-
-    # ==========================================
-    # PLOT 1: Radial Profile - BLL Predictions
-    # ==========================================
-    ax1_bll = plt.subplot(3, 2, 1)
-    ax1_bll.set_title("Radial Wave Profile: BLL Predictions vs Truth", fontsize=12, fontweight="bold")
-    ax1_bll.plot(r_axis_bll, z_true_bll, "k-", label="Ground Truth (Clean)", alpha=0.7, linewidth=2)
-    ax1_bll.plot(r_axis_bll, z_noisy_bll, "gray", label="Noisy Observations", alpha=0.3, linewidth=1)
-    ax1_bll.plot(r_axis_bll, z_pred_bll, "b-", label="BLL Prediction", linewidth=2)
-
-    if BACKWARD_EXTRAPOLATION:
-        ax1_bll.axvline(
-            switch_r_bll, color="orange", linestyle=":", linewidth=2, label="Train/Test Boundary"
-        )
-    else:
-        ax1_bll.axvline(switch_r_bll, color="green", linestyle=":", linewidth=2, label="Task Switch")
-
-    ax1_bll.set_xlabel("Radius (r)")
-    ax1_bll.set_ylabel("z Value (Wave Height)")
-    ax1_bll.legend(loc="upper right", fontsize=8)
-    ax1_bll.grid(True, alpha=0.3)
-
-    if BACKWARD_EXTRAPOLATION:
-        ax1_bll.text(
-            r_axis_bll[len(r_axis_bll) // 4],
-            ax1_bll.get_ylim()[1] * 0.85,
-            "Task 1 BACKWARD\n(inner radii)\nA=15.0\nNot Trained",
-            ha="center",
-            fontsize=9,
-            color="darkred",
-            bbox={"boxstyle": "round", "facecolor": "lightyellow", "alpha": 0.3},
-        )
-        if switch_idx_bll < len(r_axis_bll):
-            ax1_bll.text(
-                r_axis_bll[switch_idx_bll + (len(r_axis_bll) - switch_idx_bll) // 2],
-                ax1_bll.get_ylim()[1] * 0.85,
-                "Task 0 TRAINED\n(outer radii)\nA=5.0\nBLL Trained",
-                ha="center",
-                fontsize=9,
-                color="darkgreen",
-                bbox={"boxstyle": "round", "facecolor": "lightgreen", "alpha": 0.3},
-            )
-    else:
-        ax1_bll.text(
-            r_axis_bll[len(r_axis_bll) // 4],
-            ax1_bll.get_ylim()[1] * 0.85,
-            "Task 0\n(A=5.0)\nBLL Training",
-            ha="center",
-            fontsize=9,
-            color="blue",
-            bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.3},
-        )
-        if switch_idx_bll < len(r_axis_bll):
-            ax1_bll.text(
-                r_axis_bll[switch_idx_bll + (len(r_axis_bll) - switch_idx_bll) // 2],
-                ax1_bll.get_ylim()[1] * 0.85,
-                "Task 1\n(A=15.0)\nPrediction Only\n(BLL Frozen)",
-                ha="center",
-                fontsize=9,
-                color="blue",
-                bbox={"boxstyle": "round", "facecolor": "lightblue", "alpha": 0.3},
-            )
-
-    # ==========================================
-    # PLOT 2: BLL Uncertainty
-    # ==========================================
-    ax2_bll = plt.subplot(3, 2, 2)
-    ax2_bll.set_title("BLL Predictive Uncertainty (σ) vs Radius", fontsize=12, fontweight="bold")
-    ax2_bll.plot(r_axis_bll, sigma_bll, "purple", linewidth=2, label="BLL Uncertainty (σ)")
-    ax2_bll.fill_between(
-        r_axis_bll,
-        0,
-        3 * sigma_bll,
-        color="purple",
-        alpha=0.2,
-        label="3σ Confidence",
-    )
-    ax2_bll.axvline(switch_r_bll, color="green", linestyle=":", linewidth=2)
-    ax2_bll.set_xlabel("Radius (r)")
-    ax2_bll.set_ylabel("Uncertainty (σ)")
-    ax2_bll.legend(loc="upper right", fontsize=8)
-    ax2_bll.grid(True, alpha=0.3)
-
-    # ==========================================
-    # PLOT 3: Squared Error
-    # ==========================================
-    ax3_bll = plt.subplot(3, 2, 3)
-    ax3_bll.set_title("Squared Error vs Radius", fontsize=12, fontweight="bold")
-    ax3_bll.plot(r_axis_bll, innovation_sq_bll, "orange", linewidth=1.5, label="Squared Error")
-    ax3_bll.axvline(switch_r_bll, color="green", linestyle=":", linewidth=2)
-    ax3_bll.set_xlabel("Radius (r)")
-    ax3_bll.set_ylabel("Squared Error")
-    ax3_bll.legend(loc="upper right", fontsize=8)
-    ax3_bll.grid(True, alpha=0.3)
-
-    # ==========================================
-    # PLOT 4: Trace(P)
-    # ==========================================
-    ax4_bll = plt.subplot(3, 2, 4)
-    ax4_bll.set_title("Trace(P) vs Radius (Weight Uncertainty)", fontsize=12, fontweight="bold")
-    ax4_bll.plot(r_axis_bll, trace_P_bll, "teal", linewidth=2, label="Trace(P)")
-    ax4_bll.axvline(switch_r_bll, color="green", linestyle=":", linewidth=2)
-    ax4_bll.set_xlabel("Radius (r)")
-    ax4_bll.set_ylabel("Trace(P)")
-    ax4_bll.legend(loc="upper right", fontsize=8)
-    ax4_bll.grid(True, alpha=0.3)
-    ax4_bll.text(
-        0.5,
-        0.95,
-        "Note: BLL trace(P) is constant (no online updates)",
-        transform=ax4_bll.transAxes,
-        fontsize=8,
-        verticalalignment="top",
-        horizontalalignment="center",
-        bbox={"boxstyle": "round", "facecolor": "yellow", "alpha": 0.3},
-    )
-
-    # ==========================================
-    # PLOT 5: Absolute Prediction Error
-    # ==========================================
-    ax5_bll = plt.subplot(3, 2, 5)
-    ax5_bll.set_title("BLL Prediction Error vs Radius", fontsize=12, fontweight="bold")
-    abs_error_bll = np.abs(z_true_bll - z_pred_bll)
-    ax5_bll.plot(r_axis_bll, abs_error_bll, "b-", label="BLL Absolute Error", linewidth=1.5, alpha=0.7)
-    if BACKWARD_EXTRAPOLATION:
-        ax5_bll.axvline(switch_r_bll, color="orange", linestyle=":", linewidth=2)
-    else:
-        ax5_bll.axvline(switch_r_bll, color="green", linestyle=":", linewidth=2)
-    ax5_bll.set_xlabel("Radius (r)")
-    ax5_bll.set_ylabel("Absolute Error")
-    ax5_bll.legend(loc="upper right", fontsize=8)
-    ax5_bll.grid(True, alpha=0.3)
-
-    # ==========================================
-    # PLOT 6: Summary Statistics
-    # ==========================================
-    ax6_bll = plt.subplot(3, 2, 6)
-    ax6_bll.axis("off")
-
-    region0_mask_bll = bll_task_ids == 0
-    region1_mask_bll = bll_task_ids == 1
-
-    bll_rmse_region0 = np.sqrt(np.mean(abs_error_bll[region0_mask_bll] ** 2))
-    bll_rmse_region1 = (
-        np.sqrt(np.mean(abs_error_bll[region1_mask_bll] ** 2)) if region1_mask_bll.any() else 0
-    )
-
-    if BACKWARD_EXTRAPOLATION:
-        region0_name_bll = "TASK 0 TRAINING (outer radii, A=5.0)"
-        region1_name_bll = "TASK 1 BACKWARD (inner radii, A=15.0)"
-    else:
-        region0_name_bll = "TASK 0 (amplitude=5.0)"
-        region1_name_bll = "TASK 1 (amplitude=15.0)"
-
-    summary_text_bll = f"""
-    BLL SUMMARY STATISTICS
-    {"=" * 40}
-
-    {region0_name_bll}:
-    ────────────────────────────────────────
-    BLL RMSE:       {bll_rmse_region0:.6f}
-    Mean σ (BLL):   {np.mean(sigma_bll[region0_mask_bll]):.6f}
-    Mean Trace(P):  {np.mean(trace_P_bll[region0_mask_bll]):.6f}
-
-    {region1_name_bll}:
-    ────────────────────────────────────────
-    BLL RMSE:       {bll_rmse_region1:.6f}
-    Mean σ (BLL):   {(np.mean(sigma_bll[region1_mask_bll]) if region1_mask_bll.any() else 0):.6f}
-    Mean Trace(P):  {(np.mean(trace_P_bll[region1_mask_bll]) if region1_mask_bll.any() else 0):.6f}
-
-    CONFIGURATION:
-    ────────────────────────────────────────
-    Total Points:   {len(r_axis_bll)}
-    Switch Radius:  {switch_r_bll:.2f}
-    RNN Hidden:     {HIDDEN_SIZE}
-    Sequence Len:   {SEQ_LEN}
-    BLL Sigma:      {BLL_SIGMA:.3f}
-    BLL Alpha:      {BLL_ALPHA:.3f}
-    """
-
-    ax6_bll.text(
-        0.1,
-        0.5,
-        summary_text_bll,
-        transform=ax6_bll.transAxes,
-        fontsize=9,
-        verticalalignment="center",
-        family="monospace",
-        bbox={"boxstyle": "round", "facecolor": "lightblue", "alpha": 0.5},
-    )
-
-    print(summary_text_bll)
-
-    plt.tight_layout()
-
-    # Save BLL figure
+    # Use shared utility function for BLL plotting
     mode = "backward" if BACKWARD_EXTRAPOLATION else "forward"
     save_path_bll = (
         f"results/figures/Bessel_Ripple_BLL_{mode}_sigma{BLL_SIGMA:.3f}_alpha{BLL_ALPHA:.3f}.png"
     )
-    plt.savefig(save_path_bll, dpi=300, bbox_inches="tight")
-    print(f"\nBLL Figure saved to {save_path_bll}")
-    plt.show()
+    plot_bll_results(
+        bll_results=bll_results,
+        task_ids=bll_task_ids,
+        task_configs=TASK_CONFIGS,
+        bll_sigma=BLL_SIGMA,
+        bll_alpha=BLL_ALPHA,
+        hidden_size=HIDDEN_SIZE,
+        seq_len=SEQ_LEN,
+        pretrain_epochs=PRETRAIN_EPOCHS,
+        backward_mode=BACKWARD_EXTRAPOLATION,
+        save_path=save_path_bll,
+    )
 
     print("\n" + "=" * 70)
     print("ALL EXPERIMENTS COMPLETE!")
