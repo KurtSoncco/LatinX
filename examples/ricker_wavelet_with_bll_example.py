@@ -15,11 +15,11 @@ import numpy as np
 from latinx.data.ricker_wavelet import RickerWaveletTranslator
 from latinx.models.bayesian_last_layer import BayesianLastLayer
 from latinx.plotting import (
+    plot_bll_vs_full_nn,
     plot_ricker_wavelet,
     plot_ricker_wavelet_3d,
-    plot_ricker_wavelet_contour,
     plot_ricker_wavelet_comparison,
-    plot_bll_vs_full_nn,
+    plot_ricker_wavelet_contour,
 )
 
 
@@ -46,7 +46,7 @@ def main():
 
     # 2. Visualize clean ricker wavelet
     print("\n2. Creating comprehensive visualization of clean function...")
-    fig1 = plot_ricker_wavelet(
+    plot_ricker_wavelet(
         data,
         column="z",
         title="ricker wavelet Function - Clean Data (σ=1.5, A=2.0)",
@@ -55,7 +55,7 @@ def main():
 
     # 3. Visualize noisy data
     print("\n3. Creating visualization of noisy data...")
-    fig2 = plot_ricker_wavelet(
+    plot_ricker_wavelet(
         data,
         column="z_noisy",
         title="ricker wavelet Function - Noisy Data (noise σ=0.1)",
@@ -64,7 +64,7 @@ def main():
 
     # 4. Create standalone 3D plot
     print("\n4. Creating 3D surface plot...")
-    fig3 = plot_ricker_wavelet_3d(
+    plot_ricker_wavelet_3d(
         data,
         column="z",
         title="ricker wavelet - 3D Surface View",
@@ -75,7 +75,7 @@ def main():
 
     # 5. Create contour plot
     print("\n5. Creating contour plot...")
-    fig4 = plot_ricker_wavelet_contour(
+    plot_ricker_wavelet_contour(
         data,
         column="z",
         title="ricker wavelet - Contour Map",
@@ -86,7 +86,7 @@ def main():
 
     # 6. Compare clean vs noisy
     print("\n6. Creating clean vs noisy comparison...")
-    fig5 = plot_ricker_wavelet_comparison(
+    plot_ricker_wavelet_comparison(
         data,
         columns=("z", "z_noisy"),
         labels=("Clean Function", "With Noise (σ=0.1)"),
@@ -133,7 +133,7 @@ def main():
     print("\n9. Visualizing BLL predictions...")
     data["z_predicted"] = np.array(y_pred)
 
-    fig6 = plot_ricker_wavelet_comparison(
+    plot_ricker_wavelet_comparison(
         data,
         columns=("z", "z_predicted"),
         labels=("Ground Truth", "BLL Predictions"),
@@ -178,7 +178,7 @@ def main():
     data_test["uncertainty"] = np.array(y_std_test)
 
     # Create comparison on test grid
-    fig7 = plot_ricker_wavelet_comparison(
+    plot_ricker_wavelet_comparison(
         data_test,
         columns=("z", "z_predicted"),
         labels=("True Function (Extended)", "BLL Extrapolation"),
@@ -187,7 +187,7 @@ def main():
     )
 
     # Visualize uncertainty on extended grid
-    fig8 = plot_ricker_wavelet(
+    plot_ricker_wavelet(
         data_test,
         column="uncertainty",
         title="Prediction Uncertainty on Extended Domain",
@@ -196,9 +196,9 @@ def main():
 
     print("\n11. Creating BLL vs Full NN comparison plot...")
     y_pred_nn = bll.predict_full_nn(X)
-    rmse_full_nn = np.sqrt((np.mean(y_target - y_pred_nn) ** 2))
+    rmse_full_nn = np.sqrt(np.mean(y_target - y_pred_nn) ** 2)
 
-    fig_comparison_bessel = plot_bll_vs_full_nn(
+    plot_bll_vs_full_nn(
         data=data,
         bll_predictions=np.array(y_pred),
         nn_predictions=np.array(y_pred_nn),

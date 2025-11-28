@@ -24,13 +24,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
 from Bessel_Ripple_KF import (
     SimpleRNN,
 )
+
 from latinx.data.rossler import RosslerTranslator
 from latinx.models.kalman_filter import MultiOutputKalmanFilterHead
-
 
 # ==========================================
 # TASK CONFIGURATION
@@ -435,7 +434,7 @@ if __name__ == "__main__":
         kf, rnn_model, t_values, xyz_clean_task0, xyz_noisy_task0, 0, SWITCH_POINT, SEQ_LEN
     )
 
-    print(f"\nStep 2: Testing KF on Task 1 (different dynamics)")
+    print("\nStep 2: Testing KF on Task 1 (different dynamics)")
     print(f"Task 1: {TASK_CONFIGS[1]['label']}")
     print(
         f"Parameters: a={TASK_CONFIGS[1]['a']}, b={TASK_CONFIGS[1]['b']}, c={TASK_CONFIGS[1]['c']}"
@@ -483,7 +482,7 @@ if __name__ == "__main__":
     # Split points for task switch
     split_point = len(results_train["t"])
 
-    print(f"Data shapes:")
+    print("Data shapes:")
     print(f"  t_axis:        {t_axis.shape}")
     print(f"  xyz_true:      {xyz_true.shape}")
     print(f"  xyz_pred_kf:   {xyz_pred_kf.shape}")
@@ -491,7 +490,7 @@ if __name__ == "__main__":
     print(f"  Split point:   {split_point}")
     print("=" * 60)
 
-    print(f"\nProcessing complete!")
+    print("\nProcessing complete!")
     print(f"Total points processed: {len(t_axis)}")
 
     # ==========================================
@@ -501,8 +500,6 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("PHASE 3: Visualization (3D Trajectories)")
     print("=" * 60)
-
-    from mpl_toolkits.mplot3d import Axes3D
 
     # Create main figure with 3D plots
     fig = plt.figure(figsize=(20, 12))
@@ -710,12 +707,12 @@ Trace(P) Range: [{trace_P.min():.2e}, {trace_P.max():.2e}]
         transform=ax8.transAxes,
         fontsize=9,
         verticalalignment="center",
-        bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.5),
+        bbox={"boxstyle": "round", "facecolor": "lightblue", "alpha": 0.5},
         family="monospace",
     )
 
     plt.suptitle(
-        f"Rössler 3D Multi-Output KF: Ground Truth vs Predictions", fontsize=14, fontweight="bold"
+        "Rössler 3D Multi-Output KF: Ground Truth vs Predictions", fontsize=14, fontweight="bold"
     )
     plt.tight_layout()
 
@@ -805,7 +802,7 @@ Trace(P) Range: [{trace_P.min():.2e}, {trace_P.max():.2e}]
             fontsize=9,
             verticalalignment="top",
             horizontalalignment="left",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.8),
+            bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.8},
         )
 
     plt.suptitle(

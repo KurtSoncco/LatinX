@@ -5,8 +5,6 @@ This script demonstrates how to generate and visualize Rössler system trajector
 """
 
 import matplotlib.pyplot as plt
-import numpy as np
-from mpl_toolkits.mplot3d import Axes3D
 
 from latinx.data.rossler import RosslerTranslator
 

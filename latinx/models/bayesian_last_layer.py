@@ -5,19 +5,21 @@ This module implements a plugin approach where a standard neural network is trai
 then the last layer is removed and replaced with a Bayesian linear regression model.
 """
 
+from collections.abc import Callable
+from copy import deepcopy
+from typing import Any
+
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import optax
-import flax.linen as nn
 from flax.training.train_state import TrainState
-from copy import deepcopy
-from typing import Callable, Dict, Any, Tuple
 
 
 class MLP(nn.Module):
     """Multi-layer perceptron with configurable hidden layers."""
 
-    hidden_dims: Tuple[int, ...] = (10, 10)
+    hidden_dims: tuple[int, ...] = (10, 10)
     output_dim: int = 1
     activation: Callable = nn.elu
 
@@ -33,7 +35,7 @@ class MLP(nn.Module):
 class MLPHidden(nn.Module):
     """Multi-layer perceptron without the last layer (feature extractor)."""
 
-    hidden_dims: Tuple[int, ...] = (10, 10)
+    hidden_dims: tuple[int, ...] = (10, 10)
     activation: Callable = nn.elu
 
     @nn.compact
@@ -62,7 +64,7 @@ class BayesianLastLayer:
 
     def __init__(
         self,
-        hidden_dims: Tuple[int, ...] = (10, 10),
+        hidden_dims: tuple[int, ...] = (10, 10),
         sigma: float = 0.3,
         alpha: float = 0.05,
         learning_rate: float = 1e-3,
@@ -89,20 +91,20 @@ class BayesianLastLayer:
         self.posterior_precision = None
         self.beta = None  # observation precision
 
-    def _lossfn(self, params: Dict, x: jnp.ndarray, y: jnp.ndarray) -> float:
+    def _lossfn(self, params: dict, x: jnp.ndarray, y: jnp.ndarray) -> float:
         """Mean squared error loss function."""
         yhat = self.model.apply(params, x).squeeze()
         return jnp.power(y.squeeze() - yhat, 2).mean()
 
     def _step(
         self, state: TrainState, _: Any, x: jnp.ndarray, y: jnp.ndarray
-    ) -> Tuple[TrainState, float]:
+    ) -> tuple[TrainState, float]:
         """Single training step."""
         loss, grads = jax.value_and_grad(lambda p: self._lossfn(p, x, y))(state.params)
         state = state.apply_gradients(grads=grads)
         return state, loss
 
-    def _train_neural_network(self, x: jnp.ndarray, y: jnp.ndarray) -> Tuple[Dict, jnp.ndarray]:
+    def _train_neural_network(self, x: jnp.ndarray, y: jnp.ndarray) -> tuple[dict, jnp.ndarray]:
         """
         Train the full neural network.
 
@@ -121,12 +123,14 @@ class BayesianLastLayer:
         )
 
         # Training loop
-        step_fn = lambda state, i: self._step(state, i, x, y)
+        def step_fn(state, i):
+            return self._step(state, i, x, y)
+
         state_final, loss_history = jax.lax.scan(step_fn, state, jnp.arange(self.n_steps))
 
         return state_final.params, loss_history
 
-    def _extract_hidden_params(self, params_full: Dict) -> Dict:
+    def _extract_hidden_params(self, params_full: dict) -> dict:
         """Extract parameters for all layers except the last one."""
         params_hidden = deepcopy(params_full)
         del params_hidden["params"]["last-layer"]
@@ -185,7 +189,7 @@ class BayesianLastLayer:
 
     def predict(
         self, x: jnp.ndarray, return_std: bool = False
-    ) -> jnp.ndarray | Tuple[jnp.ndarray, jnp.ndarray]:
+    ) -> jnp.ndarray | tuple[jnp.ndarray, jnp.ndarray]:
         """
         Make predictions using the Bayesian last layer.
 

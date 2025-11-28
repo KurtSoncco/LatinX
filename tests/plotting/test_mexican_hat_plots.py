@@ -10,8 +10,8 @@ from latinx.data.ricker_wavelet import RickerWaveletTranslator
 from latinx.plotting import (
     plot_ricker_wavelet,
     plot_ricker_wavelet_3d,
-    plot_ricker_wavelet_contour,
     plot_ricker_wavelet_comparison,
+    plot_ricker_wavelet_contour,
 )
 
 

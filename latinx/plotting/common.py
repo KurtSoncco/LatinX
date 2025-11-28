@@ -1,17 +1,16 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from typing import Tuple, Optional
 
 
 def plot_bll_vs_full_nn(
     data: pd.DataFrame,
     bll_predictions: np.ndarray,
     nn_predictions: np.ndarray,
-    figsize: Tuple[int, int] = (18, 5),
-    title: Optional[str] = None,
+    figsize: tuple[int, int] = (18, 5),
+    title: str | None = None,
     cmap: str = "plasma",
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Visualize ground truth, Bayesian Last Layer predictions, and Full NN predictions in 3D.

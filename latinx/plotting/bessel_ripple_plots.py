@@ -8,17 +8,15 @@ including 3D surface plots, contour plots, and comparison visualizations.
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from mpl_toolkits.mplot3d import Axes3D
-from typing import Tuple, Optional
 
 
 def plot_bessel_ripple(
     data: pd.DataFrame,
     column: str = "z",
-    figsize: Tuple[int, int] = (16, 5),
-    title: Optional[str] = None,
+    figsize: tuple[int, int] = (16, 5),
+    title: str | None = None,
     cmap: str = "plasma",
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Create a comprehensive visualization of Bessel ripple data with 3D and 2D views.
@@ -109,12 +107,12 @@ def plot_bessel_ripple(
 def plot_bessel_ripple_3d(
     data: pd.DataFrame,
     column: str = "z",
-    figsize: Tuple[int, int] = (9, 7),
-    title: Optional[str] = None,
+    figsize: tuple[int, int] = (9, 7),
+    title: str | None = None,
     cmap: str = "plasma",
     elev: int = 30,
     azim: int = 45,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Create a standalone 3D surface plot of Bessel ripple data.
@@ -169,12 +167,12 @@ def plot_bessel_ripple_3d(
 def plot_bessel_ripple_contour(
     data: pd.DataFrame,
     column: str = "z",
-    figsize: Tuple[int, int] = (8, 7),
-    title: Optional[str] = None,
+    figsize: tuple[int, int] = (8, 7),
+    title: str | None = None,
     cmap: str = "plasma",
     levels: int = 30,
     show_lines: bool = True,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Create a standalone contour plot of Bessel ripple data.
@@ -232,10 +230,10 @@ def plot_bessel_ripple_with_uncertainty(
     data: pd.DataFrame,
     predictions: np.ndarray,
     uncertainty: np.ndarray,
-    figsize: Tuple[int, int] = (18, 5),
-    title: Optional[str] = None,
+    figsize: tuple[int, int] = (18, 5),
+    title: str | None = None,
     cmap: str = "plasma",
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Visualize Bessel ripple with model predictions and uncertainty.

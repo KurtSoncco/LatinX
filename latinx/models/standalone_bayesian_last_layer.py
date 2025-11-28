@@ -7,7 +7,6 @@ with pre-computed features from any JAX or PyTorch model.
 
 import jax.numpy as jnp
 import numpy as np
-from typing import Tuple, Union
 
 
 class StandaloneBayesianLastLayer:
@@ -75,7 +74,7 @@ class StandaloneBayesianLastLayer:
         self.posterior_covariance = None
         self._is_fitted = False
 
-    def fit(self, features: Union[jnp.ndarray, np.ndarray], y: Union[jnp.ndarray, np.ndarray]):
+    def fit(self, features: jnp.ndarray | np.ndarray, y: jnp.ndarray | np.ndarray):
         """
         Fit Bayesian linear regression on pre-computed features.
 
@@ -131,9 +130,9 @@ class StandaloneBayesianLastLayer:
 
     def predict(
         self,
-        features: Union[jnp.ndarray, np.ndarray],
+        features: jnp.ndarray | np.ndarray,
         return_std: bool = False,
-    ) -> Union[jnp.ndarray, Tuple[jnp.ndarray, jnp.ndarray]]:
+    ) -> jnp.ndarray | tuple[jnp.ndarray, jnp.ndarray]:
         """
         Make predictions using the fitted Bayesian last layer.
 
@@ -180,7 +179,7 @@ class StandaloneBayesianLastLayer:
 
         return pred_mean
 
-    def get_weight_statistics(self) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    def get_weight_statistics(self) -> tuple[jnp.ndarray, jnp.ndarray]:
         """
         Get posterior statistics of the weights.
 

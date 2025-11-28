@@ -44,7 +44,6 @@ from latinx.metrics.metrics_kalman_filter import (
 from latinx.models.kalman_filter import KalmanFilterHead
 from latinx.models.rnn import SimpleRNN
 
-
 # ==========================================
 # HELPER FUNCTIONS FOR KF PROCESSING
 # ==========================================
@@ -432,7 +431,7 @@ if __name__ == "__main__":
             kf, rnn_model, r_values, z_clean, z_noisy, SWITCH_POINT, len(r_values), SEQ_LEN
         )
 
-        print(f"\nStep 2: Testing KF on FIRST HALF (inner radii - extrapolation)")
+        print("\nStep 2: Testing KF on FIRST HALF (inner radii - extrapolation)")
         print(f"  Indices: [0, {SWITCH_POINT})")
         print(f"  Radius range: r ∈ [{r_values[0]:.2f}, {r_values[SWITCH_POINT - 1]:.2f}]")
 
@@ -462,7 +461,7 @@ if __name__ == "__main__":
             kf, rnn_model, r_values, z_clean, z_noisy, 0, SWITCH_POINT, SEQ_LEN
         )
 
-        print(f"\nStep 2: Testing KF on SECOND HALF (Task 1, amplitude=2.0)")
+        print("\nStep 2: Testing KF on SECOND HALF (Task 1, amplitude=2.0)")
         print(f"  Indices: [{SWITCH_POINT}, {len(r_values)})")
         print(f"  Radius range: r ∈ [{r_values[SWITCH_POINT]:.2f}, {r_values[-1]:.2f}]")
 
@@ -545,7 +544,7 @@ if __name__ == "__main__":
             ha="center",
             fontsize=9,
             color="darkred",
-            bbox=dict(boxstyle="round", facecolor="lightyellow", alpha=0.3),
+            bbox={"boxstyle": "round", "facecolor": "lightyellow", "alpha": 0.3},
         )
         if switch_idx < len(r_axis):
             ax1.text(
@@ -555,7 +554,7 @@ if __name__ == "__main__":
                 ha="center",
                 fontsize=9,
                 color="darkgreen",
-                bbox=dict(boxstyle="round", facecolor="lightgreen", alpha=0.3),
+                bbox={"boxstyle": "round", "facecolor": "lightgreen", "alpha": 0.3},
             )
     else:
         # Normal mode labels
@@ -566,7 +565,7 @@ if __name__ == "__main__":
             ha="center",
             fontsize=9,
             color="blue",
-            bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.3),
+            bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.3},
         )
         if switch_idx < len(r_axis):
             ax1.text(
@@ -576,7 +575,7 @@ if __name__ == "__main__":
                 ha="center",
                 fontsize=9,
                 color="blue",
-                bbox=dict(boxstyle="round", facecolor="lightblue", alpha=0.3),
+                bbox={"boxstyle": "round", "facecolor": "lightblue", "alpha": 0.3},
             )
 
     # ==========================================
@@ -700,7 +699,7 @@ if __name__ == "__main__":
         fontsize=9,
         verticalalignment="top",
         fontfamily="monospace",
-        bbox=dict(boxstyle="round", facecolor="wheat", alpha=0.5),
+        bbox={"boxstyle": "round", "facecolor": "wheat", "alpha": 0.5},
     )
 
     plt.tight_layout()

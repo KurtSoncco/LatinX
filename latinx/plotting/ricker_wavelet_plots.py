@@ -8,17 +8,15 @@ including 3D surface plots, contour plots, and comparison visualizations.
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from mpl_toolkits.mplot3d import Axes3D
-from typing import Tuple, Optional
 
 
 def plot_ricker_wavelet(
     data: pd.DataFrame,
     column: str = "z",
-    figsize: Tuple[int, int] = (14, 5),
-    title: Optional[str] = None,
+    figsize: tuple[int, int] = (14, 5),
+    title: str | None = None,
     cmap: str = "viridis",
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Create a comprehensive visualization of ricker wavelet data with 3D and 2D views.
@@ -112,12 +110,12 @@ def plot_ricker_wavelet(
 def plot_ricker_wavelet_3d(
     data: pd.DataFrame,
     column: str = "z",
-    figsize: Tuple[int, int] = (8, 6),
-    title: Optional[str] = None,
+    figsize: tuple[int, int] = (8, 6),
+    title: str | None = None,
     cmap: str = "viridis",
     elev: int = 25,
     azim: int = 45,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Create a standalone 3D surface plot of ricker wavelet data.
@@ -172,12 +170,12 @@ def plot_ricker_wavelet_3d(
 def plot_ricker_wavelet_contour(
     data: pd.DataFrame,
     column: str = "z",
-    figsize: Tuple[int, int] = (7, 6),
-    title: Optional[str] = None,
+    figsize: tuple[int, int] = (7, 6),
+    title: str | None = None,
     cmap: str = "viridis",
     levels: int = 20,
     show_lines: bool = True,
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Create a standalone contour plot of ricker wavelet data.
@@ -233,12 +231,12 @@ def plot_ricker_wavelet_contour(
 
 def plot_ricker_wavelet_comparison(
     data: pd.DataFrame,
-    columns: Tuple[str, str] = ("z", "z_noisy"),
-    labels: Optional[Tuple[str, str]] = None,
-    figsize: Tuple[int, int] = (14, 5),
-    title: Optional[str] = None,
+    columns: tuple[str, str] = ("z", "z_noisy"),
+    labels: tuple[str, str] | None = None,
+    figsize: tuple[int, int] = (14, 5),
+    title: str | None = None,
     cmap: str = "viridis",
-    save_path: Optional[str] = None,
+    save_path: str | None = None,
 ):
     """
     Compare two ricker wavelet datasets side-by-side (e.g., clean vs noisy).

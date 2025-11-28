@@ -48,7 +48,7 @@ def main():
 
     # 2. Visualize clean Bessel ripple
     print("\n2. Creating comprehensive visualization of clean ripple...")
-    fig1 = plot_bessel_ripple(
+    plot_bessel_ripple(
         data,
         column="z",
         title="Bessel Ripple Wave - Clean Data (k=6.0, damping=0.05)",
@@ -84,7 +84,7 @@ def main():
 
     # 4. Visualize noisy data
     print("\n4. Creating visualization of noisy ripple...")
-    fig2 = plot_bessel_ripple(
+    plot_bessel_ripple(
         data,
         column="z_noisy",
         title="Bessel Ripple Wave - Noisy Data (σ=0.05)",
@@ -93,7 +93,7 @@ def main():
 
     # 5. Create standalone 3D plot
     print("\n5. Creating 3D surface plot...")
-    fig3 = plot_bessel_ripple_3d(
+    plot_bessel_ripple_3d(
         data,
         column="z",
         title="Bessel Ripple - 3D View",
@@ -104,7 +104,7 @@ def main():
 
     # 6. Create contour plot
     print("\n6. Creating contour plot...")
-    fig4 = plot_bessel_ripple_contour(
+    plot_bessel_ripple_contour(
         data,
         column="z",
         title="Bessel Ripple - Contour Map",
@@ -164,7 +164,7 @@ def main():
 
     # 10. Visualize predictions and uncertainty
     print("\n10. Creating prediction and uncertainty visualization...")
-    fig5 = plot_bessel_ripple_with_uncertainty(
+    plot_bessel_ripple_with_uncertainty(
         data,
         predictions=y_pred,
         uncertainty=y_std,
@@ -174,9 +174,9 @@ def main():
 
     print("\n11. Creating BLL vs Full NN comparison plot...")
     y_pred_nn = bll.predict_full_nn(X)
-    rmse_full_nn = np.sqrt((np.mean(y_target - y_pred_nn) ** 2))
+    rmse_full_nn = np.sqrt(np.mean(y_target - y_pred_nn) ** 2)
 
-    fig_comparison_bessel = plot_bll_vs_full_nn(
+    plot_bll_vs_full_nn(
         data=data,
         bll_predictions=np.array(y_pred),
         nn_predictions=np.array(y_pred_nn),
