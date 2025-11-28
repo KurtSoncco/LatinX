@@ -37,10 +37,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from latinx.data.bessel_ripple import BesselRippleTranslator
-from latinx.metrics.metrics_kalman_filter import (
-    innovation,
-    trace_covariance,
-)
+from latinx.metrics.metrics_kalman_filter import innovation, trace_covariance
 from latinx.models.kalman_filter import KalmanFilterHead
 from latinx.models.rnn import SimpleRNN
 

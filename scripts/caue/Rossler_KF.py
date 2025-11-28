@@ -24,9 +24,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from Bessel_Ripple_KF import (
-    SimpleRNN,
-)
+from Bessel_Ripple_KF import SimpleRNN
 
 from latinx.data.rossler import RosslerTranslator
 from latinx.models.kalman_filter import MultiOutputKalmanFilterHead

@@ -227,13 +227,15 @@ def main():
     print(f"- Average prediction uncertainty: {np.mean(y_std):.6f}")
     print(f"- Uncertainty increases {unc_out / unc_in:.2f}x outside training range")
     print("\nTo save plots, add save_path parameter:")
-    print("""
+    print(
+        """
     plot_ricker_wavelet(
         data,
         column='z',
         save_path='ricker_wavelet_plot.png'
     )
-    """)
+    """
+    )
 
 
 if __name__ == "__main__":

@@ -10,9 +10,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 from latinx.data.sine_cosine import SineCosineTranslator
-from latinx.metrics.metrics_bayesian_last_layer import (
-    mae as bll_mae,
-)
+from latinx.metrics.metrics_bayesian_last_layer import mae as bll_mae
 from latinx.metrics.metrics_kalman_filter import (
     absolute_error,
     innovation,
