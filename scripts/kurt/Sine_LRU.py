@@ -10,6 +10,9 @@ import torch.nn as nn
 import torch.optim as optim
 
 from latinx.data.sine_cosine import SineCosineTranslator
+from latinx.metrics.metrics_bayesian_last_layer import (
+    mae as bll_mae,
+)
 from latinx.metrics.metrics_kalman_filter import (
     absolute_error,
     innovation,
@@ -21,6 +24,7 @@ from latinx.metrics.metrics_kalman_filter import (
     weight_norm,
 )
 from latinx.models.kalman_filter import KalmanFilterHead
+from latinx.models.standalone_bayesian_last_layer import StandaloneBayesianLastLayer
 
 # Task configuration: cleaner and more maintainable
 TASK_CONFIGS: dict[int, dict[str, float]] = {
@@ -152,22 +156,33 @@ if __name__ == "__main__":
     # Precompute sequences for each task using SineCosineTranslator
     translators_cache = _build_task_translators(num_samples=SIM_STEPS)
 
-    # Initialize the Bayesian Head
+    # Initialize the Bayesian Heads
     kf = KalmanFilterHead(feature_dim=HIDDEN_SIZE, rho=0.99, Q_std=0.05, R_std=0.1)
+    bll = StandaloneBayesianLastLayer(sigma=0.1, alpha=0.05, feature_dim=HIDDEN_SIZE)
 
     # Buffer for the sliding window
     input_buffer = deque(np.zeros(SEQ_LEN), maxlen=SEQ_LEN)
 
+    # Storage for accumulated features and targets (for BLL incremental refitting)
+    accumulated_features = []
+    accumulated_targets = []
+
     # Storage for plotting
     history = {
         "y_true": [],
-        "y_pred": [],
-        "sigma": [],
-        "weights_norm": [],
-        "trace_covariance": [],
+        "y_pred": [],  # Kalman Filter predictions
+        "y_pred_bll": [],  # Bayesian Last Layer predictions
+        "sigma": [],  # Kalman Filter uncertainty
+        "sigma_bll": [],  # Bayesian Last Layer uncertainty
+        "weights_norm": [],  # KF weight norm
+        "weights_norm_bll": [],  # BLL weight norm
+        "trace_covariance": [],  # KF trace covariance
+        "trace_covariance_bll": [],  # BLL posterior uncertainty
         "nis": [],
-        "absolute_error": [],
+        "absolute_error": [],  # KF absolute error
+        "absolute_error_bll": [],  # BLL absolute error
         "uncertainty_3sigma": [],
+        "uncertainty_3sigma_bll": [],
         "kalman_gain_norm": [],
         "innovation": [],
         "innovation_variance": [],
@@ -200,7 +215,10 @@ if __name__ == "__main__":
         # Convert to JAX array for the Kalman Filter
         phi = jnp.array(features_tensor.detach().numpy().T)  # Shape (M, 1)
 
-        # 2. Head: Bayesian Prediction & (conditional) Update
+        # Convert features for BLL: shape (1, feature_dim)
+        phi_bll = jnp.array(features_tensor.detach().numpy())  # Shape (1, M)
+
+        # 2. Kalman Filter: Bayesian Prediction & (conditional) Update
         # Train (update) ONLY during Task 0; Tasks 1 & 2 are prediction-only.
         pred_val = kf.predict(phi)
         if curr_task == 0:
@@ -217,35 +235,87 @@ if __name__ == "__main__":
                 uncertainty_S = float(jnp.nan)
             error = y_t - pred_val
 
+        # 3. Bayesian Last Layer: Prediction & Incremental Refitting
+        # Incremental refitting for BLL (only during Task 0)
+        if curr_task == 0:
+            # Accumulate features and targets
+            accumulated_features.append(phi_bll[0])  # Store as 1D array (M,)
+            accumulated_targets.append(y_t)
+
+            # Refit BLL on accumulated data
+            if len(accumulated_features) > 0:
+                features_array = jnp.array(accumulated_features)  # (n_samples, M)
+                targets_array = jnp.array(accumulated_targets)  # (n_samples,)
+                bll.fit(features_array, targets_array)
+
+        # Make prediction with BLL (after refitting if Task 0, or with existing model if Tasks 1-2)
+        if bll._is_fitted:
+            pred_val_bll, sigma_bll = bll.predict(phi_bll, return_std=True)
+            pred_val_bll = float(pred_val_bll.item())
+            sigma_bll = float(sigma_bll.item())
+        else:
+            # Not fitted yet (shouldn't happen after first Task 0 step)
+            pred_val_bll = 0.0
+            sigma_bll = float(jnp.nan)
+
         # --- Store Results ---
         history["y_true"].append(y_t)
         history["y_pred"].append(pred_val)
+        history["y_pred_bll"].append(pred_val_bll)
         history["sigma"].append(np.sqrt(uncertainty_S))
+        history["sigma_bll"].append(sigma_bll)
         history["weights_norm"].append(weight_norm(kf))
+        # Compute BLL weight norm directly (compatible interface)
+        if bll._is_fitted and bll.posterior_mean is not None:
+            history["weights_norm_bll"].append(float(jnp.linalg.norm(bll.posterior_mean)))
+        else:
+            history["weights_norm_bll"].append(float(jnp.nan))
         history["trace_covariance"].append(trace_covariance(kf))
+        # Compute BLL posterior uncertainty directly (trace of covariance)
+        if bll._is_fitted and bll.posterior_covariance is not None:
+            history["trace_covariance_bll"].append(float(jnp.trace(bll.posterior_covariance)))
+        else:
+            history["trace_covariance_bll"].append(float(jnp.nan))
         history["nis"].append(normalized_innovation_squared(kf))
         history["absolute_error"].append(absolute_error(y_t, pred_val))
+        history["absolute_error_bll"].append(bll_mae([y_t], [pred_val_bll]))
         history["uncertainty_3sigma"].append(uncertainty_3sigma(kf))
+        history["uncertainty_3sigma_bll"].append(
+            3.0 * sigma_bll if not jnp.isnan(sigma_bll) else float(jnp.nan)
+        )
         history["kalman_gain_norm"].append(kalman_gain_norm(kf))
         history["innovation"].append(innovation(kf))
         history["innovation_variance"].append(innovation_variance(kf))
 
     # ==========================================
-    # 6. PLOTTING
+    # 6. PLOTTING - COMPARISON FIGURES
     # ==========================================
     save_path = "results/figures/Figure_A.png"
     time_axis = np.arange(SIM_STEPS)
     y_true = np.array(history["y_true"])
     y_pred = np.array(history["y_pred"])
+    y_pred_bll = np.array(history["y_pred_bll"])
     sigma = np.array(history["sigma"])
+    sigma_bll = np.array(history["sigma_bll"])
+
+    # Filter out NaN values for BLL (before it's fitted)
+    valid_bll_mask = ~np.isnan(y_pred_bll)
 
     plt.figure(figsize=(15, 12))
 
-    # Plot 1: Trajectory and Adaptation
+    # Plot 1: Trajectory and Adaptation - Comparison
     plt.subplot(3, 1, 1)
-    plt.title("RNN Backbone + JAX Kalman Filter Head: Adapting to Task Shifts")
-    plt.plot(time_axis, y_true, "k-", label="Ground Truth", alpha=0.6)
-    plt.plot(time_axis, y_pred, "r--", label="KF Prediction", linewidth=1.5)
+    plt.title("RNN Backbone + Bayesian Heads: Kalman Filter vs Bayesian Last Layer")
+    plt.plot(time_axis, y_true, "k-", label="Ground Truth", alpha=0.6, linewidth=2)
+    plt.plot(time_axis, y_pred, "r--", label="Kalman Filter", linewidth=1.5, alpha=0.8)
+    plt.plot(
+        time_axis[valid_bll_mask],
+        y_pred_bll[valid_bll_mask],
+        "b:",
+        label="Bayesian Last Layer",
+        linewidth=1.5,
+        alpha=0.8,
+    )
 
     # Mark context switches
     for pt in SWITCH_POINTS:
@@ -264,29 +334,57 @@ if __name__ == "__main__":
     )
     plt.legend(loc="upper right")
     plt.grid(True, alpha=0.3)
+    plt.ylabel("Value")
 
-    # Plot 2: Uncertainty
+    # Plot 2: Uncertainty Comparison
     plt.subplot(3, 1, 2)
-    plt.title("Uncertainty Estimation (Sigma)")
-    error = y_true - y_pred
-    plt.plot(time_axis, np.abs(error), "grey", alpha=0.5, label="Absolute Error")
-    # Plot 3-sigma confidence interval
+    plt.title("Uncertainty Estimation Comparison")
+    error_kf = y_true - y_pred
+    error_bll = y_true - y_pred_bll
+    plt.plot(time_axis, np.abs(error_kf), "grey", alpha=0.5, label="KF Absolute Error", linewidth=1)
+    plt.plot(
+        time_axis[valid_bll_mask],
+        np.abs(error_bll[valid_bll_mask]),
+        "lightblue",
+        alpha=0.5,
+        label="BLL Absolute Error",
+        linewidth=1,
+    )
+    # Plot 3-sigma confidence intervals
     plt.fill_between(
-        time_axis, 0, 3 * sigma, color="red", alpha=0.2, label=r"Uncertainty (3$\sigma$)"
+        time_axis, 0, 3 * sigma, color="red", alpha=0.15, label=r"KF Uncertainty (3$\sigma$)"
+    )
+    plt.fill_between(
+        time_axis[valid_bll_mask],
+        0,
+        3 * sigma_bll[valid_bll_mask],
+        color="blue",
+        alpha=0.15,
+        label=r"BLL Uncertainty (3$\sigma$)",
     )
     for pt in SWITCH_POINTS:
         plt.axvline(pt, color="blue", linestyle=":")
     plt.legend()
     plt.ylabel("Magnitude")
 
-    # Plot 3: Weight Norms
+    # Plot 3: Weight Norms Comparison
     plt.subplot(3, 1, 3)
     plt.title("Norm of Weight Vector (Adaptation Effort)")
-    plt.plot(time_axis, history["weights_norm"], "purple", label="||w||")
+    plt.plot(time_axis, history["weights_norm"], "purple", label="KF ||w||", linewidth=1.5)
+    weights_norm_bll = np.array(history["weights_norm_bll"])
+    valid_weights_mask = ~np.isnan(weights_norm_bll)
+    plt.plot(
+        time_axis[valid_weights_mask],
+        weights_norm_bll[valid_weights_mask],
+        "orange",
+        label="BLL ||w||",
+        linewidth=1.5,
+    )
     for pt in SWITCH_POINTS:
         plt.axvline(pt, color="blue", linestyle=":")
     plt.xlabel("Time Step")
     plt.ylabel("L2 Norm")
+    plt.legend()
     plt.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -294,79 +392,137 @@ if __name__ == "__main__":
     plt.show()
 
     # ==========================================
-    # 7. METRICS PLOTTING
+    # 7. METRICS PLOTTING - COMPARISON
     # ==========================================
-    print("Generating metrics figure...")
+    print("Generating metrics comparison figure...")
     metrics_save_path = "results/figures/Figure_Metrics.png"
     time_axis = np.arange(SIM_STEPS)
 
-    # Create a comprehensive metrics figure
+    # Create a comprehensive metrics figure with comparisons
     fig, axes = plt.subplots(4, 2, figsize=(16, 16))
-    fig.suptitle("Kalman Filter Metrics Over Time", fontsize=16, fontweight="bold")
+    fig.suptitle(
+        "Kalman Filter vs Bayesian Last Layer: Metrics Comparison", fontsize=16, fontweight="bold"
+    )
 
-    # Plot 1: Trace of Covariance Matrix
-    axes[0, 0].plot(time_axis, history["trace_covariance"], "b-", linewidth=1.5)
-    axes[0, 0].set_title("Trace of Covariance Matrix P")
-    axes[0, 0].set_ylabel("Trace(P)")
+    # Prepare BLL data with NaN filtering
+    trace_cov_bll = np.array(history["trace_covariance_bll"])
+    abs_error_bll = np.array(history["absolute_error_bll"])
+    uncertainty_3sigma_bll = np.array(history["uncertainty_3sigma_bll"])
+    weights_norm_bll = np.array(history["weights_norm_bll"])
+    valid_bll_mask = ~np.isnan(trace_cov_bll)
+
+    # Plot 1: Trace of Covariance Matrix - Comparison
+    axes[0, 0].plot(
+        time_axis, history["trace_covariance"], "b-", linewidth=1.5, label="KF Trace(P)", alpha=0.8
+    )
+    axes[0, 0].plot(
+        time_axis[valid_bll_mask],
+        trace_cov_bll[valid_bll_mask],
+        "r--",
+        linewidth=1.5,
+        label="BLL Trace(Cov)",
+        alpha=0.8,
+    )
+    axes[0, 0].set_title("Trace of Covariance Matrix (Uncertainty)")
+    axes[0, 0].set_ylabel("Trace")
+    axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
     for pt in SWITCH_POINTS:
         axes[0, 0].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
 
-    # Plot 2: Normalized Innovation Squared (NIS)
+    # Plot 2: Normalized Innovation Squared (NIS) - KF only
     axes[0, 1].plot(time_axis, history["nis"], "g-", linewidth=1.5, label="NIS")
     axes[0, 1].axhline(1.0, color="r", linestyle="--", linewidth=1, label="Target (NIS=1)")
-    axes[0, 1].set_title("Normalized Innovation Squared (NIS)")
+    axes[0, 1].set_title("Normalized Innovation Squared (NIS) - KF Only")
     axes[0, 1].set_ylabel("NIS")
     axes[0, 1].legend()
     axes[0, 1].grid(True, alpha=0.3)
     for pt in SWITCH_POINTS:
         axes[0, 1].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
 
-    # Plot 3: Absolute Error
-    axes[1, 0].plot(time_axis, history["absolute_error"], "orange", linewidth=1.5)
-    axes[1, 0].set_title("Absolute Error")
+    # Plot 3: Absolute Error - Comparison
+    axes[1, 0].plot(
+        time_axis, history["absolute_error"], "orange", linewidth=1.5, label="KF", alpha=0.8
+    )
+    axes[1, 0].plot(
+        time_axis[valid_bll_mask],
+        abs_error_bll[valid_bll_mask],
+        "brown",
+        linewidth=1.5,
+        label="BLL",
+        alpha=0.8,
+        linestyle="--",
+    )
+    axes[1, 0].set_title("Absolute Error Comparison")
     axes[1, 0].set_ylabel("|y_true - y_pred|")
+    axes[1, 0].legend()
     axes[1, 0].grid(True, alpha=0.3)
     for pt in SWITCH_POINTS:
         axes[1, 0].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
 
-    # Plot 4: Uncertainty (3 Sigma)
-    axes[1, 1].plot(time_axis, history["uncertainty_3sigma"], "purple", linewidth=1.5)
+    # Plot 4: Uncertainty (3 Sigma) - Comparison
+    axes[1, 1].plot(
+        time_axis, history["uncertainty_3sigma"], "purple", linewidth=1.5, label="KF", alpha=0.8
+    )
+    valid_uncertainty_mask = ~np.isnan(uncertainty_3sigma_bll)
+    axes[1, 1].plot(
+        time_axis[valid_uncertainty_mask],
+        uncertainty_3sigma_bll[valid_uncertainty_mask],
+        "cyan",
+        linewidth=1.5,
+        label="BLL",
+        alpha=0.8,
+        linestyle="--",
+    )
     axes[1, 1].set_title("Uncertainty (3-Sigma Confidence Interval)")
     axes[1, 1].set_ylabel("3σ")
+    axes[1, 1].legend()
     axes[1, 1].grid(True, alpha=0.3)
     for pt in SWITCH_POINTS:
         axes[1, 1].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
 
-    # Plot 5: Weight Norm
-    axes[2, 0].plot(time_axis, history["weights_norm"], "brown", linewidth=1.5)
+    # Plot 5: Weight Norm - Comparison
+    axes[2, 0].plot(
+        time_axis, history["weights_norm"], "brown", linewidth=1.5, label="KF ||μ||", alpha=0.8
+    )
+    valid_weights_mask = ~np.isnan(weights_norm_bll)
+    axes[2, 0].plot(
+        time_axis[valid_weights_mask],
+        weights_norm_bll[valid_weights_mask],
+        "orange",
+        linewidth=1.5,
+        label="BLL ||w||",
+        alpha=0.8,
+        linestyle="--",
+    )
     axes[2, 0].set_title("Norm of Weight Vector")
-    axes[2, 0].set_ylabel("||μ||")
+    axes[2, 0].set_ylabel("L2 Norm")
+    axes[2, 0].legend()
     axes[2, 0].grid(True, alpha=0.3)
     for pt in SWITCH_POINTS:
         axes[2, 0].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
 
-    # Plot 6: Kalman Gain Norm
+    # Plot 6: Kalman Gain Norm - KF only
     axes[2, 1].plot(time_axis, history["kalman_gain_norm"], "teal", linewidth=1.5)
-    axes[2, 1].set_title("Norm of Kalman Gain")
+    axes[2, 1].set_title("Norm of Kalman Gain (KF Only)")
     axes[2, 1].set_ylabel("||K||")
     axes[2, 1].grid(True, alpha=0.3)
     for pt in SWITCH_POINTS:
         axes[2, 1].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
 
-    # Plot 7: Innovation
+    # Plot 7: Innovation - KF only
     axes[3, 0].plot(time_axis, history["innovation"], "magenta", linewidth=1.5)
     axes[3, 0].axhline(0.0, color="k", linestyle="--", linewidth=0.5, alpha=0.5)
-    axes[3, 0].set_title("Innovation (Prediction Error)")
+    axes[3, 0].set_title("Innovation (Prediction Error) - KF Only")
     axes[3, 0].set_xlabel("Time Step")
     axes[3, 0].set_ylabel("Innovation")
     axes[3, 0].grid(True, alpha=0.3)
     for pt in SWITCH_POINTS:
         axes[3, 0].axvline(pt, color="red", linestyle=":", linewidth=1, alpha=0.7)
 
-    # Plot 8: Innovation Variance
+    # Plot 8: Innovation Variance - KF only
     axes[3, 1].plot(time_axis, history["innovation_variance"], "darkgreen", linewidth=1.5)
-    axes[3, 1].set_title("Innovation Variance (S)")
+    axes[3, 1].set_title("Innovation Variance (S) - KF Only")
     axes[3, 1].set_xlabel("Time Step")
     axes[3, 1].set_ylabel("Variance")
     axes[3, 1].grid(True, alpha=0.3)
@@ -376,4 +532,4 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.savefig(metrics_save_path, dpi=300)
     plt.show()
-    print(f"Metrics figure saved to {metrics_save_path}")
+    print(f"Metrics comparison figure saved to {metrics_save_path}")

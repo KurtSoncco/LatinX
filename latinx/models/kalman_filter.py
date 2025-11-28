@@ -248,9 +248,7 @@ class MultiOutputKalmanFilterHead:
             K_d = self.P_minus @ self.H.T / S_d  # (M, 1)
 
             # Update weights for this output: mu_d = mu_minus_d + K_d * error_d
-            updated_mu = updated_mu.at[:, d].set(
-                (self.mu_minus[:, d] + K_d.squeeze() * error[d])
-            )
+            updated_mu = updated_mu.at[:, d].set(self.mu_minus[:, d] + K_d.squeeze() * error[d])
 
         self.mu = updated_mu
 

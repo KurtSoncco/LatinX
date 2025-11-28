@@ -1,23 +1,11 @@
 """Metrics module for evaluating Kalman filters and other models."""
 
 # Kalman Filter metrics
-from latinx.metrics.metrics_kalman_filter import (
-    absolute_error,
-    compute_all_metrics as compute_all_kalman_metrics,
-    compute_metrics_over_time,
-    innovation,
-    innovation_variance,
-    kalman_gain_norm,
-    normalized_innovation_squared,
-    rmse as kalman_rmse,
-    trace_covariance,
-    uncertainty_3sigma,
-    weight_norm as kalman_weight_norm,
-)
-
 # Bayesian Last Layer metrics
 from latinx.metrics.metrics_bayesian_last_layer import (
     compute_all_metrics as compute_all_bll_metrics,
+)
+from latinx.metrics.metrics_bayesian_last_layer import (
     log_likelihood,
     mae,
     max_prediction_uncertainty,
@@ -27,8 +15,31 @@ from latinx.metrics.metrics_bayesian_last_layer import (
     posterior_condition_number,
     posterior_uncertainty,
     prediction_uncertainty,
+)
+from latinx.metrics.metrics_bayesian_last_layer import (
     rmse as bll_rmse,
+)
+from latinx.metrics.metrics_bayesian_last_layer import (
     weight_norm as bll_weight_norm,
+)
+from latinx.metrics.metrics_kalman_filter import (
+    absolute_error,
+    compute_metrics_over_time,
+    innovation,
+    innovation_variance,
+    kalman_gain_norm,
+    normalized_innovation_squared,
+    trace_covariance,
+    uncertainty_3sigma,
+)
+from latinx.metrics.metrics_kalman_filter import (
+    compute_all_metrics as compute_all_kalman_metrics,
+)
+from latinx.metrics.metrics_kalman_filter import (
+    rmse as kalman_rmse,
+)
+from latinx.metrics.metrics_kalman_filter import (
+    weight_norm as kalman_weight_norm,
 )
 
 __all__ = [
