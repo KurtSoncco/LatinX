@@ -275,15 +275,18 @@ def extract_features_and_targets(
     z_true_list = []
     z_noisy_list = []
 
+    # Ensure we don't exceed array bounds
+    actual_end_idx = min(end_idx, len(r_values), len(z_clean), len(z_noisy))
+
     # Initialize buffer
     input_buffer = deque(maxlen=seq_len)
     for i in range(seq_len):
         idx = start_idx + i
-        if idx < end_idx:
+        if idx < actual_end_idx:
             input_buffer.append(z_noisy[idx])
 
     # Process all data points
-    for t in range(start_idx + seq_len, end_idx):
+    for t in range(start_idx + seq_len, actual_end_idx):
         r_t = r_values[t]
         z_true = z_clean[t]
         z_noisy_t = z_noisy[t]
@@ -322,24 +325,41 @@ def run_bll_training(
     end_idx: int,
     seq_len: int,
 ) -> dict[str, np.ndarray]:
-    """Train BLL on training data and make predictions."""
+    """
+    Train BLL with batch fitting (not incremental).
+
+    BLL is fitted ONCE on all training data, then used to make predictions.
+    This is more stable than incremental refitting.
+    """
+    # Step 1: Extract ALL features and targets first
+    print(f"  DEBUG: start_idx={start_idx}, end_idx={end_idx}, seq_len={seq_len}")
+    print(f"  DEBUG: Array lengths: r_values={len(r_values)}, z_clean={len(z_clean)}, z_noisy={len(z_noisy)}")
+    print(f"  DEBUG: Expected samples: {end_idx - start_idx - seq_len}")
     features, r_vals, z_true_vals, z_noisy_vals = extract_features_and_targets(
         rnn_model, r_values, z_clean, z_noisy, start_idx, end_idx, seq_len
     )
 
-    # Fit BLL on training data
-    print(f"  Fitting BLL on {len(features)} samples...")
+    # Step 2: Fit BLL ONCE on all training data
+    print(f"  Fitting BLL on {len(features)} training samples (batch mode)...")
+    print(f"  DEBUG: r range: [{r_vals[0]:.3f}, {r_vals[-1]:.3f}]")
+    print(f"  DEBUG: z_noisy range: [{np.min(z_noisy_vals):.3f}, {np.max(z_noisy_vals):.3f}]")
+    print(f"  DEBUG: z_true range: [{np.min(z_true_vals):.3f}, {np.max(z_true_vals):.3f}]")
+    print(f"  DEBUG: features shape: {features.shape}")
     bll_model.fit(features, z_noisy_vals)
 
-    # Make predictions with uncertainty
+    # Step 3: Make predictions with the fitted model
+    print(f"  Making training predictions with fitted BLL...")
     z_pred_bll, sigma_bll = bll_model.predict(features, return_std=True)
     z_pred_bll = np.array(z_pred_bll)
     sigma_bll = np.array(sigma_bll)
+    print(f"  DEBUG: z_pred range: [{np.min(z_pred_bll):.3f}, {np.max(z_pred_bll):.3f}]")
+    print(f"  DEBUG: sigma range: [{np.min(sigma_bll):.3f}, {np.max(sigma_bll):.3f}]")
 
-    # Compute residuals
+    # Step 4: Compute residuals
     innovation = z_true_vals - z_pred_bll
     innovation_sq = innovation**2
     trace_P = np.full(len(r_vals), bll_model.get_total_uncertainty())
+    print(f"  DEBUG: Training RMSE: {np.sqrt(np.mean(innovation**2)):.4f}")
 
     return {
         "r": r_vals,
@@ -370,14 +390,21 @@ def run_bll_prediction_only(
 
     # Predict with frozen BLL
     print(f"  Predicting on {len(features)} samples (BLL frozen)...")
+    print(f"  DEBUG: r range: [{r_vals[0]:.3f}, {r_vals[-1]:.3f}]")
+    print(f"  DEBUG: z_noisy range: [{np.min(z_noisy_vals):.3f}, {np.max(z_noisy_vals):.3f}]")
+    print(f"  DEBUG: z_true range: [{np.min(z_true_vals):.3f}, {np.max(z_true_vals):.3f}]")
+    print(f"  DEBUG: features shape: {features.shape}")
     z_pred_bll, sigma_bll = bll_model.predict(features, return_std=True)
     z_pred_bll = np.array(z_pred_bll)
     sigma_bll = np.array(sigma_bll)
+    print(f"  DEBUG: z_pred range: [{np.min(z_pred_bll):.3f}, {np.max(z_pred_bll):.3f}]")
+    print(f"  DEBUG: sigma range: [{np.min(sigma_bll):.3f}, {np.max(sigma_bll):.3f}]")
 
     # Compute residuals
     innovation = z_true_vals - z_pred_bll
     innovation_sq = innovation**2
     trace_P = np.full(len(r_vals), bll_model.get_total_uncertainty())
+    print(f"  DEBUG: Testing RMSE: {np.sqrt(np.mean(innovation**2)):.4f}")
 
     return {
         "r": r_vals,
@@ -417,7 +444,7 @@ def combine_bll_results(*results_list) -> dict[str, np.ndarray]:
 TASK_CONFIGS: dict[int, dict[str, float]] = {
     0: {
         "k": 6.0,
-        "amplitude": 1.0,
+        "amplitude": 5.0,
         "damping": 0.05,
         "noise_std": 0.03,
     },
@@ -481,14 +508,14 @@ if __name__ == "__main__":
     # ==========================================
     # CONFIGURATION
     # ==========================================
-    BACKWARD_EXTRAPOLATION = False  # Train on last half, test on first half
+    BACKWARD_EXTRAPOLATION = True  # Train on last half, test on first half
 
     print("Bessel Ripple RNN+KF Experiment (Radial Sequences)")
 
     # ==========================================
     # PHASE 1: PRE-TRAIN RNN BACKBONE
     # ==========================================
-    print("Phase 1: Pre-training RNN on Task 0 (Bessel Ripple, amplitude=1.0)...")
+    print("Phase 1: Pre-training RNN on Task 0 (Bessel Ripple, amplitude=5.0)...")
 
     N_RADIAL_POINTS = 400  # Number of radial samples (one per radius)
     SEQ_LEN = 10  # Sequence length for RNN
@@ -556,6 +583,7 @@ if __name__ == "__main__":
     print("\nPre-training complete. Freezing RNN weights.")
     for param in rnn_model.parameters():
         param.requires_grad = False
+    rnn_model.eval()  # Set to evaluation mode
     del pretrain_head
 
     # ==========================================
@@ -565,8 +593,8 @@ if __name__ == "__main__":
 
     # Kalman Filter hyperparameters
     KF_RHO = 1.0
-    KF_Q_STD = 0.2
-    KF_R_STD = 0.003
+    KF_Q_STD = 0.0002
+    KF_R_STD = 0.01
 
     # Initialize Kalman Filter Head
     kf = KalmanFilterHead(feature_dim=HIDDEN_SIZE, rho=KF_RHO, Q_std=KF_Q_STD, R_std=KF_R_STD)
@@ -577,37 +605,43 @@ if __name__ == "__main__":
     z_noisy = task0["z_noisy"]
 
     if BACKWARD_EXTRAPOLATION:
-        print("\nPhase 2: Backward Extrapolation Mode")
-        print("Step 1: Training KF on SECOND HALF (outer radii)")
+        print("\nPhase 2: Backward Extrapolation + Task Switching Mode")
+        print("Step 1: Training KF on SECOND HALF of Task 0 (outer radii, amplitude=5.0)")
         print(f"  Indices: [{SWITCH_POINT}, {len(r_values)})")
         print(f"  Radius range: r ∈ [{r_values[SWITCH_POINT]:.2f}, {r_values[-1]:.2f}]")
 
-        # Train KF on second half (interpolation region)
+        # Train KF on second half of Task 0
         results_train = run_kf_with_updates(
             kf, rnn_model, r_values, z_clean, z_noisy, SWITCH_POINT, len(r_values), SEQ_LEN
         )
 
-        print("\nStep 2: Testing KF on FIRST HALF (inner radii - extrapolation)")
+        print("\nStep 2: Testing KF on FIRST HALF of Task 1 (inner radii - BACKWARD EXTRAPOLATION + NEW TASK)")
         print(f"  Indices: [0, {SWITCH_POINT})")
         print(f"  Radius range: r ∈ [{r_values[0]:.2f}, {r_values[SWITCH_POINT - 1]:.2f}]")
+        print(f"  Challenge: Unseen inner radii + different amplitude (Task 1: amplitude=15.0)")
 
-        # Test KF on first half (extrapolation region)
+        # Get Task 1 data for backward extrapolation test
+        task1 = task_data[1]
+        z_clean_task1 = task1["z"]
+        z_noisy_task1 = task1["z_noisy"]
+
+        # Test KF on first half of Task 1 (backward extrapolation + task shift)
         results_test = run_kf_prediction_only(
-            kf, rnn_model, r_values, z_clean, z_noisy, 0, SWITCH_POINT, SEQ_LEN
+            kf, rnn_model, r_values, z_clean_task1, z_noisy_task1, 0, SWITCH_POINT, SEQ_LEN
         )
 
-        # Combine: extrapolation first, then interpolation
+        # Combine: test first (Task 1 backward), then train (Task 0 forward)
         results = combine_results(results_test, results_train)
         task_ids = np.concatenate(
             [
-                np.zeros(len(results_test["r"])),  # 0 = extrapolation
-                np.ones(len(results_train["r"])),  # 1 = interpolation
+                np.ones(len(results_test["r"])),  # 1 = Task 1 (backward extrapolation)
+                np.zeros(len(results_train["r"])),  # 0 = Task 0 (training)
             ]
         )
 
     else:
         print("\nPhase 2: Normal Mode (Task Switching)")
-        print("Step 1: Training KF on FIRST HALF (Task 0, amplitude=1.0)")
+        print("Step 1: Training KF on FIRST HALF (Task 0, amplitude=5.0)")
         print(f"  Indices: [0, {SWITCH_POINT})")
         print(f"  Radius range: r ∈ [{r_values[0]:.2f}, {r_values[SWITCH_POINT - 1]:.2f}]")
 
@@ -666,7 +700,12 @@ if __name__ == "__main__":
     fig = plt.figure(figsize=(18, 14))
 
     # Find switch point in plotted data
-    switch_idx = np.where(task_ids == 1)[0][0] if 1 in task_ids else len(r_axis)
+    if BACKWARD_EXTRAPOLATION:
+        # In backward mode: task 1 first, then task 0. Find transition from 1→0
+        switch_idx = np.where(task_ids == 0)[0][0] if 0 in task_ids else len(r_axis)
+    else:
+        # In normal mode: task 0 first, then task 1. Find transition from 0→1
+        switch_idx = np.where(task_ids == 1)[0][0] if 1 in task_ids else len(r_axis)
     switch_r = r_axis[switch_idx] if switch_idx < len(r_axis) else r_axis[-1]
 
     # ==========================================
@@ -691,11 +730,11 @@ if __name__ == "__main__":
     ax1.grid(True, alpha=0.3)
 
     if BACKWARD_EXTRAPOLATION:
-        # Backward extrapolation labels
+        # Backward extrapolation + task switching labels
         ax1.text(
             r_axis[len(r_axis) // 4],
             ax1.get_ylim()[1] * 0.85,
-            "EXTRAPOLATION\n(inner radii)\nNot Trained",
+            "Task 1 BACKWARD\n(inner radii)\nA=15.0\nNot Trained",
             ha="center",
             fontsize=9,
             color="darkred",
@@ -705,7 +744,7 @@ if __name__ == "__main__":
             ax1.text(
                 r_axis[switch_idx + (len(r_axis) - switch_idx) // 2],
                 ax1.get_ylim()[1] * 0.85,
-                "INTERPOLATION\n(outer radii)\nTrained\nKF Updates",
+                "Task 0 TRAINED\n(outer radii)\nA=1.0\nKF Updates",
                 ha="center",
                 fontsize=9,
                 color="darkgreen",
@@ -818,11 +857,11 @@ if __name__ == "__main__":
     kf_rmse_region1 = np.sqrt(np.mean(abs_error_kf[region1_mask] ** 2)) if region1_mask.any() else 0
 
     if BACKWARD_EXTRAPOLATION:
-        region0_name = "EXTRAPOLATION (inner radii)"
-        region1_name = "INTERPOLATION (outer radii)"
+        region0_name = "TASK 0 TRAINING (outer radii, A=5.0)"
+        region1_name = "TASK 1 BACKWARD (inner radii, A=15.0)"
     else:
-        region0_name = "TASK 0 (amplitude=1.0)"
-        region1_name = "TASK 1 (amplitude=2.0)"
+        region0_name = "TASK 0 (amplitude=5.0)"
+        region1_name = "TASK 1 (amplitude=15.0)"
 
     summary_text = f"""
     SUMMARY STATISTICS
@@ -873,37 +912,44 @@ if __name__ == "__main__":
     print("PHASE 3: BAYESIAN LAST LAYER (BLL) EXPERIMENT")
     print("=" * 70)
 
-    # BLL hyperparameters
-    BLL_SIGMA = 0.1  # Observation noise std
-    BLL_ALPHA = 0.01  # Prior precision
+    # BLL hyperparameters (should match actual data noise level)
+    BLL_SIGMA = 0.03  # Observation noise std (matches noise_std in task configs)
+    BLL_ALPHA = 0.01  # Prior precision (reduced for less regularization)
 
     # Initialize Bayesian Last Layer
     bll = StandaloneBayesianLastLayer(sigma=BLL_SIGMA, alpha=BLL_ALPHA, feature_dim=HIDDEN_SIZE)
 
     # Use same data as KF experiment
     if BACKWARD_EXTRAPOLATION:
-        print("\nStep 1: Training BLL on SECOND HALF (outer radii)")
+        print("\nStep 1: Training BLL on SECOND HALF of Task 0 (outer radii, amplitude=5.0)")
         print(f"  Indices: [{SWITCH_POINT}, {len(r_values)})")
 
-        # Train BLL on second half
+        # Train BLL on second half of Task 0
         bll_results_train = run_bll_training(
             bll, rnn_model, r_values, z_clean, z_noisy, SWITCH_POINT, len(r_values), SEQ_LEN
         )
 
-        print("\nStep 2: Testing BLL on FIRST HALF (inner radii - extrapolation)")
+        print("\nStep 2: Testing BLL on FIRST HALF of Task 1 (inner radii - BACKWARD + NEW TASK)")
         print(f"  Indices: [0, {SWITCH_POINT})")
+        print(f"  Challenge: Unseen inner radii + different amplitude (Task 1: amplitude=15.0)")
 
-        # Test BLL on first half
+        # Get Task 1 data for backward extrapolation test (fetch fresh to avoid any issues)
+        task1_bll = task_data[1]
+        r_values_task1_bll = task1_bll["r"]
+        z_clean_task1_bll = task1_bll["z"]
+        z_noisy_task1_bll = task1_bll["z_noisy"]
+
+        # Test BLL on first half of Task 1 (backward extrapolation + task shift)
         bll_results_test = run_bll_prediction_only(
-            bll, rnn_model, r_values, z_clean, z_noisy, 0, SWITCH_POINT, SEQ_LEN
+            bll, rnn_model, r_values_task1_bll, z_clean_task1_bll, z_noisy_task1_bll, 0, SWITCH_POINT, SEQ_LEN
         )
 
-        # Combine results
+        # Combine results: test first (Task 1 backward), then train (Task 0 forward)
         bll_results = combine_bll_results(bll_results_test, bll_results_train)
         bll_task_ids = np.concatenate(
             [
-                np.zeros(len(bll_results_test["r"])),
-                np.ones(len(bll_results_train["r"])),
+                np.ones(len(bll_results_test["r"])),  # 1 = Task 1 (backward extrapolation)
+                np.zeros(len(bll_results_train["r"])),  # 0 = Task 0 (training)
             ]
         )
 
@@ -919,9 +965,15 @@ if __name__ == "__main__":
         print("\nStep 2: Testing BLL on SECOND HALF (Task 1)")
         print(f"  Indices: [{SWITCH_POINT}, {len(r_values)})")
 
+        # Get Task 1 data for testing (fetch fresh to avoid any issues)
+        task1_bll = task_data[1]
+        r_values_task1_bll = task1_bll["r"]
+        z_clean_task1_bll = task1_bll["z"]
+        z_noisy_task1_bll = task1_bll["z_noisy"]
+
         # Test BLL on second half (Task 1 data)
         bll_results_test = run_bll_prediction_only(
-            bll, rnn_model, r_values, z_clean_task1, z_noisy_task1, SWITCH_POINT, len(r_values), SEQ_LEN
+            bll, rnn_model, r_values_task1_bll, z_clean_task1_bll, z_noisy_task1_bll, SWITCH_POINT, len(r_values_task1_bll), SEQ_LEN
         )
 
         # Combine results
@@ -955,7 +1007,12 @@ if __name__ == "__main__":
     fig_bll = plt.figure(figsize=(18, 14))
 
     # Find switch point
-    switch_idx_bll = np.where(bll_task_ids == 1)[0][0] if 1 in bll_task_ids else len(r_axis_bll)
+    if BACKWARD_EXTRAPOLATION:
+        # In backward mode: task 1 first, then task 0. Find transition from 1→0
+        switch_idx_bll = np.where(bll_task_ids == 0)[0][0] if 0 in bll_task_ids else len(r_axis_bll)
+    else:
+        # In normal mode: task 0 first, then task 1. Find transition from 0→1
+        switch_idx_bll = np.where(bll_task_ids == 1)[0][0] if 1 in bll_task_ids else len(r_axis_bll)
     switch_r_bll = r_axis_bll[switch_idx_bll] if switch_idx_bll < len(r_axis_bll) else r_axis_bll[-1]
 
     # ==========================================
@@ -983,7 +1040,7 @@ if __name__ == "__main__":
         ax1_bll.text(
             r_axis_bll[len(r_axis_bll) // 4],
             ax1_bll.get_ylim()[1] * 0.85,
-            "EXTRAPOLATION\n(inner radii)\nNot Trained",
+            "Task 1 BACKWARD\n(inner radii)\nA=15.0\nNot Trained",
             ha="center",
             fontsize=9,
             color="darkred",
@@ -993,7 +1050,7 @@ if __name__ == "__main__":
             ax1_bll.text(
                 r_axis_bll[switch_idx_bll + (len(r_axis_bll) - switch_idx_bll) // 2],
                 ax1_bll.get_ylim()[1] * 0.85,
-                "INTERPOLATION\n(outer radii)\nBLL Trained",
+                "Task 0 TRAINED\n(outer radii)\nA=5.0\nBLL Trained",
                 ha="center",
                 fontsize=9,
                 color="darkgreen",
@@ -1003,7 +1060,7 @@ if __name__ == "__main__":
         ax1_bll.text(
             r_axis_bll[len(r_axis_bll) // 4],
             ax1_bll.get_ylim()[1] * 0.85,
-            "Task 0\n(A=1.0)\nBLL Training",
+            "Task 0\n(A=5.0)\nBLL Training",
             ha="center",
             fontsize=9,
             color="blue",
@@ -1105,10 +1162,10 @@ if __name__ == "__main__":
     )
 
     if BACKWARD_EXTRAPOLATION:
-        region0_name_bll = "EXTRAPOLATION (inner radii)"
-        region1_name_bll = "INTERPOLATION (outer radii)"
+        region0_name_bll = "TASK 0 TRAINING (outer radii, A=5.0)"
+        region1_name_bll = "TASK 1 BACKWARD (inner radii, A=15.0)"
     else:
-        region0_name_bll = "TASK 0 (amplitude=1.0)"
+        region0_name_bll = "TASK 0 (amplitude=5.0)"
         region1_name_bll = "TASK 1 (amplitude=15.0)"
 
     summary_text_bll = f"""
