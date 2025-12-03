@@ -136,6 +136,11 @@ def run_bll_training(
     innovation_sq = innovation**2
     trace_P = np.full(len(r_vals), bll_model.get_total_uncertainty())
 
+    # Step 5: Compute weight norm (constant in batch mode)
+    import jax.numpy as jnp
+    weight_norm_value = float(jnp.linalg.norm(bll_model.posterior_mean))
+    weight_norm = np.full(len(r_vals), weight_norm_value)
+
     if verbose:
         rmse = np.sqrt(np.mean(innovation**2))
         print(f"  Training RMSE: {rmse:.4f}")
@@ -149,6 +154,7 @@ def run_bll_training(
         "innovation": innovation,
         "innovation_sq": innovation_sq,
         "trace_P": trace_P,
+        "weight_norm": weight_norm,
     }
 
 
@@ -198,6 +204,7 @@ def run_bll_training_incremental(
         "innovation": [],
         "innovation_sq": [],
         "trace_P": [],
+        "weight_norm": [],
     }
 
     # Accumulation buffers
@@ -252,6 +259,10 @@ def run_bll_training_incremental(
         innovation_sq = innovation**2
         trace_P = bll_model.get_total_uncertainty()
 
+        # Compute weight norm
+        import jax.numpy as jnp
+        weight_norm = float(jnp.linalg.norm(bll_model.posterior_mean))
+
         # Store results
         results["r"].append(r_t)
         results["z_true"].append(z_true)
@@ -261,6 +272,7 @@ def run_bll_training_incremental(
         results["innovation"].append(innovation)
         results["innovation_sq"].append(innovation_sq)
         results["trace_P"].append(trace_P)
+        results["weight_norm"].append(weight_norm)
 
         # Update buffer
         input_buffer.append(z_noisy_t)
@@ -323,6 +335,11 @@ def run_bll_prediction_only(
     innovation_sq = innovation**2
     trace_P = np.full(len(r_vals), bll_model.get_total_uncertainty())
 
+    # Compute weight norm (constant in prediction mode)
+    import jax.numpy as jnp
+    weight_norm_value = float(jnp.linalg.norm(bll_model.posterior_mean))
+    weight_norm = np.full(len(r_vals), weight_norm_value)
+
     if verbose:
         rmse = np.sqrt(np.mean(innovation**2))
         print(f"  Testing RMSE: {rmse:.4f}")
@@ -336,6 +353,7 @@ def run_bll_prediction_only(
         "innovation": innovation,
         "innovation_sq": innovation_sq,
         "trace_P": trace_P,
+        "weight_norm": weight_norm,
     }
 
 
@@ -358,6 +376,7 @@ def combine_bll_results(*results_list):
         "innovation": [],
         "innovation_sq": [],
         "trace_P": [],
+        "weight_norm": [],
     }
 
     for results in results_list:

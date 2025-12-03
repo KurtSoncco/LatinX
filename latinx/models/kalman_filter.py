@@ -120,6 +120,23 @@ class KalmanFilterHead:
 
         return float(S.item()), float(error)
 
+    def get_weight_statistics(self) -> tuple[Array, Array]:
+        """
+        Get current weight estimates and their uncertainties.
+
+        Returns:
+            Tuple of (weights, weight_std)
+            - weights: Current weight estimates, shape (M,)
+            - weight_std: Standard deviation of weights, shape (M,)
+
+        Example:
+            >>> weights, std = kf.get_weight_statistics()
+            >>> print(f"Weight: {weights[0]:.3f} ± {std[0]:.3f}")
+        """
+        # Diagonal of covariance gives variance for each weight
+        weight_std = jnp.sqrt(jnp.diag(self.P))
+        return self.mu.ravel(), weight_std  # Use ravel() to ensure 1D array
+
 
 class MultiOutputKalmanFilterHead:
     """
