@@ -5,9 +5,7 @@ from collections import deque
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
+import optax
 
 from latinx.data.sine_cosine import SineCosineTranslator
 from latinx.metrics.metrics_bayesian_last_layer import mae as bll_mae
@@ -22,6 +20,12 @@ from latinx.metrics.metrics_kalman_filter import (
     weight_norm,
 )
 from latinx.models.kalman_filter import KalmanFilterHead
+from latinx.models.rnn_jax import (
+    SimpleRNN,
+    create_prediction_head,
+    create_rnn,
+    create_train_step,
+)
 from latinx.models.standalone_bayesian_last_layer import StandaloneBayesianLastLayer
 
 # Task configuration: cleaner and more maintainable
@@ -51,6 +55,368 @@ def _build_task_translators(num_samples: int) -> dict[int, dict[str, np.ndarray]
             "cosine": np.asarray(df["cosine"].values, dtype=np.float64),
         }
     return cache
+
+
+def pretrain_kf_on_task0(
+    rnn_model,
+    rnn_params: dict,
+    kf: KalmanFilterHead,
+    task0_data: dict[str, np.ndarray],
+    seq_len: int,
+    verbose: bool = True,
+) -> None:
+    """
+    Pre-train Kalman Filter on Task 0 data using the frozen RNN.
+
+    This function trains the KF by:
+    1. Extracting features from the frozen RNN for each Task 0 sample
+    2. Making predictions and updating KF parameters online
+    3. Learning the Task 0 sine->cosine mapping
+
+    Args:
+        rnn_model: Trained JAX RNN model for feature extraction
+        rnn_params: JAX RNN parameters
+        kf: KalmanFilterHead instance to train
+        task0_data: Task 0 data dictionary with "sine" and "cosine" keys
+        seq_len: Sequence length for RNN input
+        verbose: Whether to print progress
+
+    Returns:
+        None (kf is updated in-place)
+
+    Example:
+        >>> pretrain_kf_on_task0(rnn_model, rnn_params, kf, task0_data, seq_len=10)
+    """
+    num_samples = len(task0_data["sine"]) - seq_len
+
+    if verbose:
+        print(f"Pre-training KF on {num_samples} samples from Task 0...")
+
+    kf_buffer = deque(np.zeros(seq_len), maxlen=seq_len)
+
+    for t in range(num_samples):
+        # Get data
+        x_t = float(task0_data["sine"][t])
+        y_t = float(task0_data["cosine"][t])
+        kf_buffer.append(x_t)
+
+        # Extract features from JAX RNN
+        input_array = jnp.array(np.array(kf_buffer)).reshape(1, seq_len, 1)
+        features_array, _ = rnn_model.apply(rnn_params, input_array)
+
+        # Features for KF: shape (M, 1)
+        phi = features_array.T
+
+        # Train KF: predict then update
+        y_pred = kf.predict(phi)
+        kf.update(y_t, y_pred)
+
+    if verbose:
+        print(f"KF pre-training complete on {num_samples} samples.")
+
+
+def train_jax_rnn_on_task0(
+    data_cache: dict[int, dict[str, np.ndarray]],
+    seq_len: int = 10,
+    hidden_size: int = 32,
+    num_epochs: int = 100,
+    learning_rate: float = 0.01,
+    batch_size: int = 32,
+    seed: int = 42,
+    verbose: bool = True,
+) -> tuple[SimpleRNN, dict]:
+    """
+    Train JAX RNN on Task 0 data (sine -> cosine mapping).
+
+    This function:
+    1. Extracts Task 0 data from the cache
+    2. Creates sliding window sequences for training
+    3. Trains the RNN + prediction head using JAX/Optax
+    4. Returns the trained RNN model and parameters (head is discarded)
+
+    Args:
+        data_cache: Dictionary from _build_task_translators containing task data
+        seq_len: Length of input sequences (default: 10)
+        hidden_size: RNN hidden dimension (default: 32)
+        num_epochs: Number of training epochs (default: 100)
+        learning_rate: Learning rate for Adam optimizer (default: 0.01)
+        batch_size: Batch size for training (default: 32)
+        seed: Random seed for reproducibility (default: 42)
+        verbose: Whether to print training progress (default: True)
+
+    Returns:
+        Tuple of (rnn_model, rnn_params) where:
+            - rnn_model: The trained RNN model (JAX/Flax)
+            - rnn_params: Trained RNN parameters (dict)
+
+    Example:
+        >>> data_cache = _build_task_translators(num_samples=2000)
+        >>> rnn_model, rnn_params = train_jax_rnn_on_task0(
+        ...     data_cache, seq_len=10, hidden_size=32
+        ... )
+        >>> # Use rnn_params with Bayesian heads for online adaptation
+    """
+    if verbose:
+        print("Training JAX RNN on Task 0 (Sine -> Cosine)...")
+
+    # Extract Task 0 data
+    task0_data = data_cache[0]
+    sine_data = task0_data["sine"]
+    cosine_data = task0_data["cosine"]
+
+    if verbose:
+        print(f"Task 0 data: {len(sine_data)} samples")
+
+    # ==========================================
+    # 1. Create JAX RNN and Prediction Head
+    # ==========================================
+    rnn_model, rnn_params = create_rnn(
+        input_size=1, hidden_size=hidden_size, seed=seed
+    )
+
+    # Create prediction head (simple linear layer)
+    pred_head, head_params = create_prediction_head(
+        hidden_size=hidden_size, output_dim=1, seed=seed
+    )
+
+    if verbose:
+        print(f"Created RNN (hidden_size={hidden_size}) and prediction head")
+
+    # ==========================================
+    # 2. Setup Optimizers
+    # ==========================================
+    rnn_optimizer = optax.adam(learning_rate)
+    head_optimizer = optax.adam(learning_rate)
+    rnn_opt_state = rnn_optimizer.init(rnn_params)
+    head_opt_state = head_optimizer.init(head_params)
+
+    # ==========================================
+    # 3. Create Training Step
+    # ==========================================
+    train_step = create_train_step(rnn_model, pred_head, rnn_optimizer, head_optimizer)
+
+    # ==========================================
+    # 4. Prepare Training Data (Sliding Windows)
+    # ==========================================
+    # Create sliding window sequences
+    train_sequences = []
+    train_targets = []
+
+    for i in range(len(sine_data) - seq_len):
+        # Input: sequence of sine values
+        seq_in = sine_data[i : i + seq_len]
+        # Target: cosine value at the end of sequence (with noise)
+        target_out = cosine_data[i + seq_len - 1]
+
+        train_sequences.append(seq_in)
+        train_targets.append(target_out)
+
+    train_sequences = np.array(train_sequences)  # (num_samples, seq_len)
+    train_targets = np.array(train_targets)  # (num_samples,)
+
+    num_samples = len(train_sequences)
+    if verbose:
+        print(f"Created {num_samples} training sequences (sliding window)")
+
+    # ==========================================
+    # 5. Training Loop
+    # ==========================================
+    for epoch in range(num_epochs):
+        epoch_loss = 0.0
+        num_batches = 0
+
+        # Shuffle data each epoch
+        indices = np.random.permutation(num_samples)
+
+        # Mini-batch training
+        for batch_start in range(0, num_samples, batch_size):
+            batch_end = min(batch_start + batch_size, num_samples)
+            batch_indices = indices[batch_start:batch_end]
+
+            # Get batch data
+            batch_sequences = train_sequences[batch_indices]  # (batch, seq_len)
+            batch_targets = train_targets[batch_indices]  # (batch,)
+
+            # Reshape for RNN: (batch, seq_len, input_size=1)
+            x_batch = jnp.array(batch_sequences[:, :, None])
+            y_batch = jnp.array(batch_targets)
+
+            # Training step
+            rnn_params, head_params, rnn_opt_state, head_opt_state, loss = train_step(
+                rnn_params, head_params, rnn_opt_state, head_opt_state, x_batch, y_batch
+            )
+
+            epoch_loss += float(loss)
+            num_batches += 1
+
+        # Print progress
+        avg_loss = epoch_loss / num_batches
+        if verbose and epoch % 20 == 0:
+            print(f"Epoch {epoch}/{num_epochs}: Loss = {avg_loss:.6f}")
+
+    if verbose:
+        print("JAX RNN training complete!")
+        print("Returning trained RNN model and parameters (prediction head discarded)")
+
+    # Return only RNN model and params (head is discarded)
+    return rnn_model, rnn_params
+
+
+def plot_frozen_evaluation_results(
+    eval_results: dict,
+    tasks: list[int],
+    task_configs: dict,
+) -> None:
+    """
+    Plot frozen model evaluation results for KF and BLL across tasks.
+
+    Creates separate plots for each task showing predictions, errors, and uncertainties,
+    plus a summary comparison plot.
+
+    Args:
+        eval_results: Dictionary containing evaluation results for each task
+        tasks: List of task IDs to plot
+        task_configs: Dictionary mapping task IDs to configuration dicts
+
+    Example:
+        >>> plot_frozen_evaluation_results(eval_results, [0, 1, 2], TASK_CONFIGS)
+    """
+    print("\nGenerating plots...")
+
+    # Create separate figure for each task
+    for task_idx, task in enumerate(tasks):
+        task_config = task_configs[task]
+        task_label = f"Task {task}: A={task_config['amplitude']}, θ={task_config['angle_multiplier']}"
+
+        # Get data for this task
+        ground_truth = np.array(eval_results[task]["ground_truth"])
+        kf_preds = np.array(eval_results[task]["kf_predictions"])
+        bll_preds = np.array(eval_results[task]["bll_predictions"])
+        kf_errors = np.array(eval_results[task]["kf_errors"])
+        bll_errors = np.array(eval_results[task]["bll_errors"])
+        kf_uncertainties = np.array(eval_results[task]["kf_uncertainties"])
+        bll_uncertainties = np.array(eval_results[task]["bll_uncertainties"])
+
+        time_steps = np.arange(len(ground_truth))
+
+        # Create 1x3 subplot for this task
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+        fig.suptitle(f"Frozen Model Evaluation - {task_label}", fontsize=14, fontweight="bold")
+
+        # ==========================================
+        # Column 1: Predictions vs Ground Truth
+        # ==========================================
+        ax1 = axes[0]
+        ax1.plot(time_steps, ground_truth, 'k-', label='Ground Truth', alpha=0.7, linewidth=2)
+        ax1.plot(time_steps, kf_preds, 'r--', label='KF', alpha=0.8, linewidth=1.5)
+        ax1.plot(time_steps, bll_preds, 'b:', label='BLL', alpha=0.8, linewidth=1.5)
+        ax1.set_title('Predictions vs Ground Truth')
+        ax1.set_xlabel('Sample Index')
+        ax1.set_ylabel('Output Value')
+        ax1.legend(loc='upper right')
+        ax1.grid(True, alpha=0.3)
+
+        # ==========================================
+        # Column 2: Absolute Errors
+        # ==========================================
+        ax2 = axes[1]
+        ax2.plot(time_steps, kf_errors, 'r-', label='KF', alpha=0.7, linewidth=1.5)
+        ax2.plot(time_steps, bll_errors, 'b-', label='BLL', alpha=0.7, linewidth=1.5)
+        ax2.axhline(np.mean(kf_errors), color='r', linestyle='--', alpha=0.5, linewidth=1)
+        ax2.axhline(np.mean(bll_errors), color='b', linestyle='--', alpha=0.5, linewidth=1)
+        ax2.set_title('Absolute Errors')
+        ax2.set_xlabel('Sample Index')
+        ax2.set_ylabel('|Error|')
+        ax2.legend(loc='upper right')
+        ax2.grid(True, alpha=0.3)
+
+        # Add text with MAE
+        kf_mae = np.mean(kf_errors)
+        bll_mae = np.mean(bll_errors)
+        ax2.text(0.02, 0.98, f'KF MAE: {kf_mae:.4f}\nBLL MAE: {bll_mae:.4f}',
+                transform=ax2.transAxes, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+        # ==========================================
+        # Column 3: Prediction Uncertainties
+        # ==========================================
+        ax3 = axes[2]
+        ax3.plot(time_steps, kf_uncertainties, 'r-', label='KF σ', alpha=0.7, linewidth=1.5)
+        ax3.plot(time_steps, bll_uncertainties, 'b-', label='BLL σ', alpha=0.7, linewidth=1.5)
+        ax3.axhline(np.mean(kf_uncertainties), color='r', linestyle='--', alpha=0.5, linewidth=1)
+        ax3.axhline(np.mean(bll_uncertainties), color='b', linestyle='--', alpha=0.5, linewidth=1)
+        ax3.set_title('Prediction Uncertainty')
+        ax3.set_xlabel('Sample Index')
+        ax3.set_ylabel('Standard Deviation')
+        ax3.legend(loc='upper right')
+        ax3.grid(True, alpha=0.3)
+
+        # Add text with mean uncertainty
+        kf_mean_unc = np.mean(kf_uncertainties)
+        bll_mean_unc = np.mean(bll_uncertainties)
+        ax3.text(0.02, 0.98, f'KF σ̄: {kf_mean_unc:.4f}\nBLL σ̄: {bll_mean_unc:.4f}',
+                transform=ax3.transAxes, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+        plt.tight_layout()
+        output_file = f"results/figures/Frozen_Eval_Task{task}.png"
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.show()
+        print(f"Plot saved to: {output_file}")
+
+    # ==========================================
+    # Summary Bar Chart
+    # ==========================================
+    fig2, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    fig2.suptitle("Frozen Model Evaluation Summary", fontsize=14, fontweight="bold")
+
+    tasks_labels = [f"Task {t}" for t in tasks]
+    kf_maes = [np.mean(eval_results[t]["kf_errors"]) for t in tasks]
+    bll_maes = [np.mean(eval_results[t]["bll_errors"]) for t in tasks]
+    kf_uncs = [np.mean(eval_results[t]["kf_uncertainties"]) for t in tasks]
+    bll_uncs = [np.mean(eval_results[t]["bll_uncertainties"]) for t in tasks]
+
+    x = np.arange(len(tasks))
+    width = 0.35
+
+    # MAE comparison
+    ax1.bar(x - width/2, kf_maes, width, label='KF', color='red', alpha=0.7)
+    ax1.bar(x + width/2, bll_maes, width, label='BLL', color='blue', alpha=0.7)
+    ax1.set_xlabel('Task')
+    ax1.set_ylabel('Mean Absolute Error')
+    ax1.set_title('Prediction Accuracy by Task')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(tasks_labels)
+    ax1.legend()
+    ax1.grid(True, alpha=0.3, axis='y')
+
+    # Add value labels on bars
+    for i, (kf_val, bll_val) in enumerate(zip(kf_maes, bll_maes)):
+        ax1.text(i - width/2, kf_val, f'{kf_val:.4f}', ha='center', va='bottom', fontsize=8)
+        ax1.text(i + width/2, bll_val, f'{bll_val:.4f}', ha='center', va='bottom', fontsize=8)
+
+    # Uncertainty comparison
+    ax2.bar(x - width/2, kf_uncs, width, label='KF', color='red', alpha=0.7)
+    ax2.bar(x + width/2, bll_uncs, width, label='BLL', color='blue', alpha=0.7)
+    ax2.set_xlabel('Task')
+    ax2.set_ylabel('Mean Uncertainty (σ)')
+    ax2.set_title('Average Prediction Uncertainty by Task')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(tasks_labels)
+    ax2.legend()
+    ax2.grid(True, alpha=0.3, axis='y')
+
+    # Add value labels on bars
+    for i, (kf_val, bll_val) in enumerate(zip(kf_uncs, bll_uncs)):
+        ax2.text(i - width/2, kf_val, f'{kf_val:.4f}', ha='center', va='bottom', fontsize=8)
+        ax2.text(i + width/2, bll_val, f'{bll_val:.4f}', ha='center', va='bottom', fontsize=8)
+
+    plt.tight_layout()
+    plt.savefig("results/figures/Frozen_Eval_Summary.png", dpi=300, bbox_inches='tight')
+    plt.show()
+    print("Plot saved to: results/figures/Frozen_Eval_Summary.png")
+
+    print("\nAll plots generated successfully!")
 
 
 def plot_trajectory_comparison(
@@ -168,7 +534,6 @@ def plot_trajectory_comparison(
     plt.savefig(save_path, dpi=300)
     plt.show()
     print(f"Trajectory comparison figure saved to {save_path}")
-
 
 def plot_metrics_comparison(
     history: dict,
@@ -325,105 +690,41 @@ def plot_metrics_comparison(
     print(f"Metrics comparison figure saved to {save_path}")
 
 
-# ==========================================
-# 2. RNN MODEL (The Backbone)
-# ==========================================
-class SimpleRNN(nn.Module):
-    """
-    Simple RNN model with feature extraction and optional prediction head.
-
-    Args:
-        input_size: Dimension of input features
-        hidden_size: Dimension of hidden state
-    """
-
-    def __init__(self, input_size: int = 1, hidden_size: int = 32):
-        super().__init__()
-        self.input_size = input_size
-        self.hidden_size = hidden_size
-        self.rnn = nn.RNN(input_size, hidden_size, batch_first=True, nonlinearity="tanh")
-
-    def forward(
-        self, x: torch.Tensor, h: torch.Tensor | None = None
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Forward pass returning backbone features only (no prediction head).
-
-        Args:
-            x: (batch, seq_len, input_size)
-            h: Optional initial hidden state (1, batch, hidden_size)
-
-        Returns:
-            Tuple (last_step_features, h_n)
-        """
-        out, h_n = self.rnn(x, h)
-        last_step_features = out[:, -1, :]
-        return last_step_features, h_n
-
-
 if __name__ == "__main__":
     # ==========================================
-    # 4. PHASE 1: PRE-TRAINING THE RNN
+    # 4. PHASE 1: PRE-TRAINING THE JAX RNN
     # ==========================================
-    print("Phase 1: Pre-training RNN on Task 0 (Sine -> Cosine)...")
+    print("Phase 1: Pre-training JAX RNN on Task 0 (Sine -> Cosine)...")
 
     # Configuration
     SEQ_LEN = 10
     HIDDEN_SIZE = 32
-    rnn_model = SimpleRNN(input_size=1, hidden_size=HIDDEN_SIZE)
-    pretrain_head = nn.Linear(HIDDEN_SIZE, 1)  # external head only used here
-    params = list(rnn_model.parameters()) + list(pretrain_head.parameters())
-    optimizer = optim.Adam(params, lr=0.01)
-    criterion = nn.MSELoss()
+    TRAIN_STEPS = 600
+    EVAL_STEPS_PER_TASK = 200  
 
-    # Train Loop (Offline)
-    for epoch in range(100):
-        # Generate batch data
-        t_vals = np.arange(0, 200, 0.1)
-        inputs = []
-        targets = []
+    # Generate Task 0 data for pre-training
+    print("Generating Task 0 training data...")
+    train_cache = _build_task_translators(num_samples=TRAIN_STEPS)
 
-        # Create sequences for the RNN
-        for i in range(len(t_vals) - SEQ_LEN):
-            # Input: Sequence of sine values
-            seq_in = np.sin(0.1 * np.arange(i, i + SEQ_LEN))
-            # Target: The cosine value at the end of that sequence
-            target_out = np.cos(0.1 * (i + SEQ_LEN - 1))
+    # Train JAX RNN using the helper function
+    rnn_model, rnn_params = train_jax_rnn_on_task0(
+        data_cache=train_cache,
+        seq_len=SEQ_LEN,
+        hidden_size=HIDDEN_SIZE,
+        num_epochs=100,
+        learning_rate=0.01,
+        batch_size=32,
+        seed=42,
+        verbose=True,
+    )
 
-            inputs.append(seq_in.reshape(SEQ_LEN, 1))
-            targets.append(target_out)
-
-        inputs = torch.tensor(np.array(inputs), dtype=torch.float32)
-        targets = torch.tensor(np.array(targets), dtype=torch.float32).view(-1, 1)
-
-        # Standard PyTorch training step
-        optimizer.zero_grad()
-        features, _ = rnn_model(inputs)
-        preds = pretrain_head(features)
-        loss = criterion(preds, targets)
-        loss.backward()
-        optimizer.step()
-
-        if epoch % 20 == 0:
-            print(f"Epoch {epoch}: Loss {loss.item():.4f}")
-
-    print("Pre-training complete. Freezing RNN weights.")
-    # Freeze the backbone!
-    for param in rnn_model.parameters():
-        param.requires_grad = False
-    # Discard the pretrain head explicitly
-    del pretrain_head
+    print("JAX RNN pre-training complete. Parameters frozen (immutable in JAX).")
 
     # ==========================================
     # 5. PHASE 2: ONLINE ADAPTATION
     # ==========================================
     print("Phase 2: Online Bayesian Adaptation across Multiple Functions...")
 
-    SIM_STEPS = 600
-    SWITCH_POINTS = [200, 400]  # Points where the task changes
-
-    # Precompute sequences for each task using SineCosineTranslator
-    translators_cache = _build_task_translators(num_samples=SIM_STEPS)
 
     # Initialize the Bayesian Heads
     # KF and BLL configured for equivalence: Q=0, rho=1.0, matching prior
@@ -437,188 +738,143 @@ if __name__ == "__main__":
     bll = StandaloneBayesianLastLayer(sigma=0.1, alpha=0.05, feature_dim=HIDDEN_SIZE)
 
     # ==========================================
+    # PRE-TRAIN KF ON TASK 0 DATA (ONLINE)
+    # ==========================================
+    task0_train_data = train_cache[0]
+    pretrain_kf_on_task0(
+        rnn_model=rnn_model,
+        rnn_params=rnn_params,
+        kf=kf,
+        task0_data=task0_train_data,
+        seq_len=SEQ_LEN,
+        verbose=True,
+    )
+
+    # ==========================================
     # PRE-TRAIN BLL ON TASK 0 DATA (BATCH)
     # ==========================================
-    def pretrain_bll_on_task0(
-        model: nn.Module,
-        task_data: dict[str, np.ndarray],
-        num_train_samples: int,
-        seq_len: int,
-    ) -> StandaloneBayesianLastLayer:
-        """
-        Pre-train BLL on Task 0 data in batch mode.
+    # Use the same Task 0 data that was used for RNN pre-training
+    num_bll_samples = len(task0_train_data["sine"]) - SEQ_LEN  # Max samples we can use
 
-        Args:
-            model: Frozen RNN model for feature extraction
-            task_data: Task 0 data from translators_cache
-            num_train_samples: Number of samples to use for training
-            seq_len: Sequence length for RNN input
+    print(f"Pre-training BLL on {num_bll_samples} samples from Task 0 (RNN pre-training data)...")
 
-        Returns:
-            Fitted BLL model
-        """
-        print(f"Pre-training BLL on {num_train_samples} samples from Task 0...")
+    features_list = []
+    targets_list = []
+    bll_buffer = deque(np.zeros(SEQ_LEN), maxlen=SEQ_LEN)
 
-        features_list = []
-        targets_list = []
-        buffer = deque(np.zeros(seq_len), maxlen=seq_len)
+    for t in range(num_bll_samples):
+        # Get data from RNN pre-training cache
+        x_t = float(task0_train_data["sine"][t])
+        y_t = float(task0_train_data["cosine"][t])
+        bll_buffer.append(x_t)
 
-        for t in range(num_train_samples):
-            # Get data
-            idx = min(t, len(task_data["sine"]) - 1)
-            x_t = float(task_data["sine"][idx])
-            y_t = float(task_data["cosine"][idx])
-            buffer.append(x_t)
+        # Extract features from JAX RNN
+        input_array = jnp.array(np.array(bll_buffer)).reshape(1, SEQ_LEN, 1)
+        features_array, _ = rnn_model.apply(rnn_params, input_array)
 
-            # Extract features from RNN
-            input_tensor = torch.tensor(np.array(buffer), dtype=torch.float32).view(
-                1, seq_len, 1
-            )
-            with torch.no_grad():
-                features_tensor, _ = model(input_tensor)
+        # Store features and targets
+        features_list.append(features_array[0])  # Store as 1D array (M,)
+        targets_list.append(y_t)
 
-            # Store features and targets
-            phi_bll = jnp.array(features_tensor.numpy())  # Shape (1, M)
-            features_list.append(phi_bll[0])  # Store as 1D array (M,)
-            targets_list.append(y_t)
+    # Fit BLL on all accumulated data
+    features_array = jnp.array(features_list)  # (n_samples, M)
+    targets_array = jnp.array(targets_list)  # (n_samples,)
+    bll.fit(features_array, targets_array)
 
-        # Fit BLL on all accumulated data
-        features_array = jnp.array(features_list)  # (n_samples, M)
-        targets_array = jnp.array(targets_list)  # (n_samples,)
-        bll.fit(features_array, targets_array)
+    print(f"BLL pre-training complete on {len(features_list)} samples.")
 
-        print(f"BLL pre-training complete on {len(features_list)} samples.")
-        return bll
+    # ==========================================
+    # 6. EVALUATION ON ALL TASKS
+    # ==========================================
+    print(f"\nGenerating evaluation data ({EVAL_STEPS_PER_TASK} samples per task)...")
+    eval_cache = _build_task_translators(num_samples=EVAL_STEPS_PER_TASK)
+    TASKS = [0, 1, 2]
 
-    # Pre-train BLL before the main loop
-    bll = pretrain_bll_on_task0(
-        model=rnn_model,
-        task_data=translators_cache[0],  # Task 0 data
-        num_train_samples=SWITCH_POINTS[0],  # Train on first 200 samples
-        seq_len=SEQ_LEN,
-    )
-
-    # Buffer for the sliding window
-    input_buffer = deque(np.zeros(SEQ_LEN), maxlen=SEQ_LEN)
-
-    # Storage for plotting
-    history:dict = {
-        "y_true": [],
-        "y_pred": [],  # Kalman Filter predictions
-        "y_pred_bll": [],  # Bayesian Last Layer predictions
-        "sigma": [],  # Kalman Filter uncertainty
-        "sigma_bll": [],  # Bayesian Last Layer uncertainty
-        "weights_norm": [],  # KF weight norm
-        "weights_norm_bll": [],  # BLL weight norm
-        "trace_covariance": [],  # KF trace covariance
-        "trace_covariance_bll": [],  # BLL posterior uncertainty
-        "nis": [],
-        "absolute_error": [],  # KF absolute error
-        "absolute_error_bll": [],  # BLL absolute error
-        "uncertainty_3sigma": [],
-        "uncertainty_3sigma_bll": [],
-        "kalman_gain_norm": [],
-        "innovation": [],
-        "innovation_variance": [],
+    # Storage for evaluation results
+    eval_results = {
+        task_id: {
+            "kf_predictions": [],
+            "kf_errors": [],
+            "kf_uncertainties": [],
+            "bll_predictions": [],
+            "bll_errors": [],
+            "bll_uncertainties": [],
+            "ground_truth": [],
+        }
+        for task_id in TASKS
     }
 
-    curr_task = 0
+    print("\nEvaluating frozen models on all tasks...")
 
-    for t in range(SIM_STEPS):
-        # --- Determine Current Task (Drift) ---
-        if t >= SWITCH_POINTS[0] and t < SWITCH_POINTS[1]:
-            curr_task = 1  # Amplitude Change (2x)
-        elif t >= SWITCH_POINTS[1]:
-            curr_task = 2  # Inversion (-1x)
-        else:
-            curr_task = 0  # Original Cosine
+    for task in TASKS:
+        print(f"\n{'='*60}")
+        print(f"Evaluating Task {task}: {TASK_CONFIGS[task]}")
+        print(f"{'='*60}")
 
-        # --- Generate Data from translator ---
-        seq = translators_cache[curr_task]
-        # Guard against indexing beyond available samples
-        idx = min(t, len(seq["sine"]) - 1)
-        x_t = float(seq["sine"][idx])
-        y_t = float(seq["cosine"][idx])
-        input_buffer.append(x_t)
+        data = eval_cache[task]
+        num_eval_samples = len(data["sine"]) - SEQ_LEN
+        eval_buffer = deque(np.zeros(SEQ_LEN), maxlen=SEQ_LEN)
 
-        # --- Forward Pass ---
-        # 1. Backbone: Get Features from Frozen RNN
-        input_tensor = torch.tensor(np.array(input_buffer), dtype=torch.float32).view(1, SEQ_LEN, 1)
-        features_tensor, _ = rnn_model(input_tensor)
+        for t in range(num_eval_samples):
+            # Get data
+            x_t = float(data["sine"][t])
+            y_t = float(data["cosine"][t])
+            eval_buffer.append(x_t)
 
-        # Convert to JAX array for the Kalman Filter
-        phi = jnp.array(features_tensor.detach().numpy().T)  # Shape (M, 1)
+            # Extract features from frozen RNN
+            input_array = jnp.array(np.array(eval_buffer)).reshape(1, SEQ_LEN, 1)
+            features_array, _ = rnn_model.apply(rnn_params, input_array)
 
-        # Convert features for BLL: shape (1, feature_dim)
-        phi_bll = jnp.array(features_tensor.detach().numpy())  # Shape (1, M)
+            # Features for KF: shape (M, 1)
+            phi_kf = features_array.T
 
-        # 2. Kalman Filter: Bayesian Prediction & (conditional) Update
-        # Train (update) ONLY during Task 0; Tasks 1 & 2 are prediction-only.
-        pred_val = kf.predict(phi)
-        if curr_task == 0:
-            # Update parameters (training phase)
-            uncertainty_S, error = kf.update(y_t, pred_val)
-        else:
-            # Prediction only (no parameter update). Use predicted covariance (P_minus) for uncertainty.
-            # Ensure predict() populated H and P_minus.
-            if kf.H is not None and kf.P_minus is not None:
-                S_mat = kf.H @ kf.P_minus @ kf.H.T + kf.R  # shape (1,1)
-                uncertainty_S = float(S_mat.item())
-            else:
-                # Fallback if internal state not set (should not happen if predict() succeeded)
-                uncertainty_S = float(jnp.nan)
-            error = y_t - pred_val
+            # Features for BLL: shape (1, M)
+            phi_bll = features_array
 
-        # 3. Bayesian Last Layer: Make predictions with pre-trained model
-        pred_val_bll, sigma_bll = bll.predict(phi_bll, return_std=True)
-        pred_val_bll = float(pred_val_bll.item())
-        sigma_bll = float(sigma_bll.item())
+            # ==========================================
+            # KF Evaluation (prediction only, no update)
+            # ==========================================
+            kf_pred = kf.predict(phi_kf)
+            _, kf_uncertainty = kf.get_prediction_uncertainty()
 
-        # --- Store Results ---
-        history["y_true"].append(y_t)
-        history["y_pred"].append(pred_val)
-        history["y_pred_bll"].append(pred_val_bll)
-        history["sigma"].append(np.sqrt(uncertainty_S))
-        history["sigma_bll"].append(sigma_bll)
-        history["weights_norm"].append(weight_norm(kf))
-        # Compute BLL weight norm directly (compatible interface)
-        if bll._is_fitted and bll.posterior_mean is not None:
-            history["weights_norm_bll"].append(float(jnp.linalg.norm(bll.posterior_mean)))
-        else:
-            history["weights_norm_bll"].append(float(jnp.nan))
-        history["trace_covariance"].append(trace_covariance(kf))
-        # Compute BLL posterior uncertainty directly (trace of covariance)
-        if bll._is_fitted and bll.posterior_covariance is not None:
-            history["trace_covariance_bll"].append(float(jnp.trace(bll.posterior_covariance)))
-        else:
-            history["trace_covariance_bll"].append(float(jnp.nan))
-        history["nis"].append(normalized_innovation_squared(kf))
-        history["absolute_error"].append(absolute_error(y_t, pred_val))
-        history["absolute_error_bll"].append(bll_mae([y_t], [pred_val_bll]))
-        history["uncertainty_3sigma"].append(uncertainty_3sigma(kf))
-        history["uncertainty_3sigma_bll"].append(
-            3.0 * sigma_bll if not jnp.isnan(sigma_bll) else float(jnp.nan)
-        )
-        history["kalman_gain_norm"].append(kalman_gain_norm(kf))
-        history["innovation"].append(innovation(kf))
-        history["innovation_variance"].append(innovation_variance(kf))
+            # ==========================================
+            # BLL Evaluation (prediction only, no update)
+            # ==========================================
+            bll_pred, bll_uncertainty = bll.predict(phi_bll, return_std=True)
+            bll_pred = float(bll_pred.item())
+            bll_uncertainty = float(bll_uncertainty.item())
+
+            # Store results
+            eval_results[task]["kf_predictions"].append(kf_pred)
+            eval_results[task]["kf_errors"].append(abs(y_t - kf_pred))
+            eval_results[task]["kf_uncertainties"].append(kf_uncertainty)
+            eval_results[task]["bll_predictions"].append(bll_pred)
+            eval_results[task]["bll_errors"].append(abs(y_t - bll_pred))
+            eval_results[task]["bll_uncertainties"].append(bll_uncertainty)
+            eval_results[task]["ground_truth"].append(y_t)
+
+        # Compute and print statistics for this task
+        kf_mae = np.mean(eval_results[task]["kf_errors"])
+        bll_mae = np.mean(eval_results[task]["bll_errors"])
+        kf_std = np.std(eval_results[task]["kf_errors"])
+        bll_std = np.std(eval_results[task]["bll_errors"])
+
+        print(f"\nTask {task} Results ({num_eval_samples} samples):")
+        print(f"  KF  - MAE: {kf_mae:.6f} ± {kf_std:.6f}")
+        print(f"  BLL - MAE: {bll_mae:.6f} ± {bll_std:.6f}")
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print("EVALUATION SUMMARY")
+    print(f"{'='*60}")
+    for task in TASKS:
+        kf_mae = np.mean(eval_results[task]["kf_errors"])
+        bll_mae = np.mean(eval_results[task]["bll_errors"])
+        print(f"Task {task}: KF={kf_mae:.6f}, BLL={bll_mae:.6f}")
+
+    print("\nEvaluation complete! Results stored in eval_results dictionary.")
 
     # ==========================================
-    # 6. PLOTTING - COMPARISON FIGURES
+    # 7. PLOTTING EVALUATION RESULTS
     # ==========================================
-    plot_trajectory_comparison(
-        history=history,
-        sim_steps=SIM_STEPS,
-        switch_points=SWITCH_POINTS,
-        save_path="results/figures/Figure_A.png",
-    )
-
-    # ==========================================
-    # 7. METRICS PLOTTING - COMPARISON
-    # ==========================================
-    plot_metrics_comparison(
-        history=history,
-        sim_steps=SIM_STEPS,
-        switch_points=SWITCH_POINTS,
-        save_path="results/figures/Figure_Metrics.png",
-    )
+    plot_frozen_evaluation_results(eval_results, TASKS, TASK_CONFIGS)
