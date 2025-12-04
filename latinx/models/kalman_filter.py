@@ -137,6 +137,36 @@ class KalmanFilterHead:
         weight_std = jnp.sqrt(jnp.diag(self.P))
         return self.mu.ravel(), weight_std  # Use ravel() to ensure 1D array
 
+    def get_prediction_uncertainty(self) -> tuple[Array, float]:
+        """
+        Get prediction uncertainty after calling predict().
+
+        Computes the innovation covariance (predictive variance) which represents
+        the uncertainty in the prediction including both parameter uncertainty
+        and measurement noise.
+
+        Returns:
+            Tuple of (S, std)
+            - S: Prediction covariance matrix (innovation covariance), shape (1, 1)
+            - std: Prediction standard deviation (scalar)
+
+        Raises:
+            RuntimeError: If predict() has not been called yet
+
+        Example:
+            >>> y_pred = kf.predict(phi_x)
+            >>> S, std = kf.get_prediction_uncertainty()
+            >>> print(f"Prediction: {y_pred:.3f} ± {std:.3f}")
+        """
+        if self.H is None or self.P_minus is None:
+            raise RuntimeError("Must call predict() before get_prediction_uncertainty()")
+
+        # Compute prediction covariance: S = H @ P_minus @ H^T + R
+        S = self.H @ self.P_minus @ self.H.T + self.R
+        std = jnp.sqrt(S).item()
+
+        return S, std
+
 
 class MultiOutputKalmanFilterHead:
     """
