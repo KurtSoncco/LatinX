@@ -97,8 +97,8 @@ class KalmanFilterHead:
         if self.mu_minus is None or self.P_minus is None or self.H is None:
             raise RuntimeError("Must call predict() before update()")
 
-        # --- 3. Measurement Update (Correct) ---
-        error = y_true - y_pred_val
+        # --- 3. Measurement Update  ---
+        error = y_true - y_pred_val #innovation
 
         # Innovation Covariance (S)
         S = self.H @ self.P_minus @ self.H.T + self.R

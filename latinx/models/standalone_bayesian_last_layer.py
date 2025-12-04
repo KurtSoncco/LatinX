@@ -6,14 +6,17 @@ with pre-computed features from any JAX or PyTorch model.
 """
 
 import jax.numpy as jnp
+import jax
 import numpy as np
 
+# Enable float64 precision for numerical stability
+jax.config.update("jax_enable_x64", True)
 
 class StandaloneBayesianLastLayer:
     """
     Model-agnostic Bayesian last layer using Bayesian linear regression.
 
-    This class accepts pre-computed features from any model (JAX or PyTorch)
+    This class accepts pre-computed features from a JAX model 
     and performs Bayesian linear regression to compute posterior distributions
     over weights. Supports both single-output and multi-output regression.
 
@@ -34,14 +37,6 @@ class StandaloneBayesianLastLayer:
     Example:
         >>> # With JAX model
         >>> features = model_hidden.apply(params, x)  # Extract features
-        >>> bll = StandaloneBayesianLastLayer(sigma=0.1, alpha=0.01, feature_dim=features.shape[1])
-        >>> bll.fit(features, y)
-        >>> y_pred, y_std = bll.predict(features, return_std=True)
-
-        >>> # With PyTorch model
-        >>> import torch
-        >>> with torch.no_grad():
-        ...     features = model(x).numpy()  # Extract features
         >>> bll = StandaloneBayesianLastLayer(sigma=0.1, alpha=0.01, feature_dim=features.shape[1])
         >>> bll.fit(features, y)
         >>> y_pred, y_std = bll.predict(features, return_std=True)
@@ -74,7 +69,7 @@ class StandaloneBayesianLastLayer:
         self.posterior_covariance = None
         self._is_fitted = False
 
-    def fit(self, features: jnp.ndarray | np.ndarray, y: jnp.ndarray | np.ndarray):
+    def fit(self, features: jnp.ndarray | np.ndarray, y: jnp.ndarray | np.ndarray)->None:
         """
         Fit Bayesian linear regression on pre-computed features.
 
@@ -124,9 +119,7 @@ class StandaloneBayesianLastLayer:
             self.posterior_mean = self.posterior_mean.ravel()
 
         self.posterior_covariance = jnp.linalg.inv(self.posterior_precision)
-
         self._is_fitted = True
-        return self
 
     def predict(
         self,
@@ -160,12 +153,12 @@ class StandaloneBayesianLastLayer:
                 f"Feature dimension mismatch: expected {self.feature_dim}, got {phi_x.shape[1]}"
             )
 
-        # Compute predictive mean using einsum (matches notebook formulation)
+        # Compute predictive mean using einsum
         if self.posterior_mean.ndim == 1:
-            # Single-output: einsum("d,td->t", posterior_mean, phi_x)
+            # Single-output
             pred_mean = jnp.einsum("d,td->t", self.posterior_mean, phi_x)
         else:
-            # Multi-output: einsum("md,tm->td", posterior_mean, phi_x)
+            # Multi-output
             pred_mean = jnp.einsum("md,tm->td", self.posterior_mean, phi_x)
 
         if return_std:
