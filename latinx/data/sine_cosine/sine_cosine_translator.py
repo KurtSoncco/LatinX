@@ -45,7 +45,10 @@ class SineCosineTranslator:
         if self.seed is not None:
             np.random.seed(self.seed)
 
-        t_values = np.linspace(0, 2 * np.pi, self.num_samples)
+        # Fixed time step instead of fixed range - maintains temporal consistency
+        # across different num_samples
+        dt = 0.05  # Fixed time step
+        t_values = np.arange(0, self.num_samples * dt, dt)[:self.num_samples]
         sine_values = self.sine_function(t_values)
         cosine_values = self.cosine_function(t_values) + np.random.normal(
             self.noise_mean, self.noise_std, self.num_samples
