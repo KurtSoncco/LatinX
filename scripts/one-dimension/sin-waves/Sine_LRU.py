@@ -331,17 +331,33 @@ def plot_frozen_evaluation_results(
     all_bll_preds = []
     all_kf_errors = []
     all_bll_errors = []
+    all_kf_errors_normalized = []
+    all_bll_errors_normalized = []
     all_kf_uncertainties = []
     all_bll_uncertainties = []
 
     task_boundaries = [0]  # Start of first task
 
     for task in tasks:
-        all_ground_truth.extend(eval_results[task]["ground_truth"])
+        task_config = task_configs[task]
+        amplitude = abs(task_config['amplitude'])  # Use absolute value for normalization
+
+        # Get task data
+        ground_truth = eval_results[task]["ground_truth"]
+        kf_errors = eval_results[task]["kf_errors"]
+        bll_errors = eval_results[task]["bll_errors"]
+
+        # Normalize errors by amplitude
+        kf_errors_norm = [err / amplitude for err in kf_errors]
+        bll_errors_norm = [err / amplitude for err in bll_errors]
+
+        all_ground_truth.extend(ground_truth)
         all_kf_preds.extend(eval_results[task]["kf_predictions"])
         all_bll_preds.extend(eval_results[task]["bll_predictions"])
-        all_kf_errors.extend(eval_results[task]["kf_errors"])
-        all_bll_errors.extend(eval_results[task]["bll_errors"])
+        all_kf_errors.extend(kf_errors)
+        all_bll_errors.extend(bll_errors)
+        all_kf_errors_normalized.extend(kf_errors_norm)
+        all_bll_errors_normalized.extend(bll_errors_norm)
         all_kf_uncertainties.extend(eval_results[task]["kf_uncertainties"])
         all_bll_uncertainties.extend(eval_results[task]["bll_uncertainties"])
 
@@ -354,6 +370,8 @@ def plot_frozen_evaluation_results(
     all_bll_preds = np.array(all_bll_preds)
     all_kf_errors = np.array(all_kf_errors)
     all_bll_errors = np.array(all_bll_errors)
+    all_kf_errors_normalized = np.array(all_kf_errors_normalized)
+    all_bll_errors_normalized = np.array(all_bll_errors_normalized)
     all_kf_uncertainties = np.array(all_kf_uncertainties)
     all_bll_uncertainties = np.array(all_bll_uncertainties)
 
@@ -439,13 +457,13 @@ def plot_frozen_evaluation_results(
     print(f"Errors plot saved to: {output_file2}")
 
     # ==========================================
-    # Plot 3: Prediction Uncertainties
+    # Plot 3: Normalized Errors (by amplitude)
     # ==========================================
     fig3, ax3 = plt.subplots(1, 1, figsize=(14, 5))
-    fig3.suptitle("Frozen Model Evaluation: Uncertainties Across All Tasks", fontsize=14, fontweight="bold")
+    fig3.suptitle("Frozen Model Evaluation: Normalized Errors Across All Tasks", fontsize=14, fontweight="bold")
 
-    ax3.plot(time_steps, all_kf_uncertainties, 'r-', label='KF σ', alpha=0.7, linewidth=1.5)
-    ax3.plot(time_steps, all_bll_uncertainties, 'b-', label='BLL σ', alpha=0.7, linewidth=1.5)
+    ax3.plot(time_steps, all_kf_errors_normalized, 'r-', label='KF', alpha=0.7, linewidth=1.5)
+    ax3.plot(time_steps, all_bll_errors_normalized, 'b-', label='BLL', alpha=0.7, linewidth=1.5)
 
     # Add task boundaries
     for i, task in enumerate(tasks):
@@ -453,53 +471,113 @@ def plot_frozen_evaluation_results(
         ax3.axvline(boundary, color='blue', linestyle=':', alpha=0.5, linewidth=2)
 
         # Add task label
+        task_config = task_configs[task]
         if i < len(tasks):
             mid_point = (task_boundaries[i] + task_boundaries[i + 1]) / 2
-            task_label = f"Task {task}"
+            task_label = f"Task {task}\n(A={task_config['amplitude']})"
             ax3.text(mid_point, ax3.get_ylim()[1] * 0.9, task_label,
                     ha='center', va='top', fontsize=9, color='blue',
                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.7, edgecolor='blue'))
 
-    ax3.set_title('Prediction Uncertainty')
+    ax3.set_title('Normalized Absolute Errors (÷ amplitude)')
     ax3.set_xlabel('Sample Index')
-    ax3.set_ylabel('Standard Deviation')
+    ax3.set_ylabel('Normalized |Error|')
     ax3.legend(loc='upper right')
     ax3.grid(True, alpha=0.3)
 
-    # Add overall mean uncertainty text
-    kf_mean_unc = np.mean(all_kf_uncertainties)
-    bll_mean_unc = np.mean(all_bll_uncertainties)
-    ax3.text(0.02, 0.98, f'Overall KF σ̄: {kf_mean_unc:.4f}\nOverall BLL σ̄: {bll_mean_unc:.4f}',
+    # Add overall normalized MAE text
+    kf_nmae = np.mean(all_kf_errors_normalized)
+    bll_nmae = np.mean(all_bll_errors_normalized)
+    ax3.text(0.02, 0.98, f'Overall KF NMAE: {kf_nmae:.4f}\nOverall BLL NMAE: {bll_nmae:.4f}',
             transform=ax3.transAxes, verticalalignment='top',
             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
     plt.tight_layout()
-    output_file3 = "results/figures/Frozen_Eval_Uncertainties.png"
+    output_file3 = "results/figures/Frozen_Eval_Errors_Normalized.png"
     plt.savefig(output_file3, dpi=300, bbox_inches='tight')
     plt.show()
-    print(f"Uncertainties plot saved to: {output_file3}")
+    print(f"Normalized errors plot saved to: {output_file3}")
+
+    # ==========================================
+    # Plot 4: Prediction Uncertainties
+    # ==========================================
+    fig4, ax4 = plt.subplots(1, 1, figsize=(14, 5))
+    fig4.suptitle("Frozen Model Evaluation: Uncertainties Across All Tasks", fontsize=14, fontweight="bold")
+
+    ax4.plot(time_steps, all_kf_uncertainties, 'r-', label='KF σ', alpha=0.7, linewidth=1.5)
+    ax4.plot(time_steps, all_bll_uncertainties, 'b-', label='BLL σ', alpha=0.7, linewidth=1.5)
+
+    # Add task boundaries
+    for i, task in enumerate(tasks):
+        boundary = task_boundaries[i]
+        ax4.axvline(boundary, color='blue', linestyle=':', alpha=0.5, linewidth=2)
+
+        # Add task label
+        if i < len(tasks):
+            mid_point = (task_boundaries[i] + task_boundaries[i + 1]) / 2
+            task_label = f"Task {task}"
+            ax4.text(mid_point, ax4.get_ylim()[1] * 0.9, task_label,
+                    ha='center', va='top', fontsize=9, color='blue',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.7, edgecolor='blue'))
+
+    ax4.set_title('Prediction Uncertainty')
+    ax4.set_xlabel('Sample Index')
+    ax4.set_ylabel('Standard Deviation')
+    ax4.legend(loc='upper right')
+    ax4.grid(True, alpha=0.3)
+
+    # Add overall mean uncertainty text
+    kf_mean_unc = np.mean(all_kf_uncertainties)
+    bll_mean_unc = np.mean(all_bll_uncertainties)
+    ax4.text(0.02, 0.98, f'Overall KF σ̄: {kf_mean_unc:.4f}\nOverall BLL σ̄: {bll_mean_unc:.4f}',
+            transform=ax4.transAxes, verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout()
+    output_file4 = "results/figures/Frozen_Eval_Uncertainties.png"
+    plt.savefig(output_file4, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Uncertainties plot saved to: {output_file4}")
 
     # ==========================================
     # Summary Bar Chart
     # ==========================================
-    fig2, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    fig2.suptitle("Frozen Model Evaluation Summary", fontsize=14, fontweight="bold")
+    fig5, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
+    fig5.suptitle("Frozen Model Evaluation Summary", fontsize=14, fontweight="bold")
 
     tasks_labels = [f"Task {t}" for t in tasks]
-    kf_maes = [np.mean(eval_results[t]["kf_errors"]) for t in tasks]
-    bll_maes = [np.mean(eval_results[t]["bll_errors"]) for t in tasks]
-    kf_uncs = [np.mean(eval_results[t]["kf_uncertainties"]) for t in tasks]
-    bll_uncs = [np.mean(eval_results[t]["bll_uncertainties"]) for t in tasks]
+
+    # Compute per-task metrics
+    kf_maes = []
+    bll_maes = []
+    kf_nmaes = []
+    bll_nmaes = []
+    kf_uncs = []
+    bll_uncs = []
+
+    for task in tasks:
+        task_config = task_configs[task]
+        amplitude = abs(task_config['amplitude'])
+
+        kf_errors = eval_results[task]["kf_errors"]
+        bll_errors = eval_results[task]["bll_errors"]
+
+        kf_maes.append(np.mean(kf_errors))
+        bll_maes.append(np.mean(bll_errors))
+        kf_nmaes.append(np.mean([e / amplitude for e in kf_errors]))
+        bll_nmaes.append(np.mean([e / amplitude for e in bll_errors]))
+        kf_uncs.append(np.mean(eval_results[task]["kf_uncertainties"]))
+        bll_uncs.append(np.mean(eval_results[task]["bll_uncertainties"]))
 
     x = np.arange(len(tasks))
     width = 0.35
 
-    # MAE comparison
+    # Absolute MAE comparison
     ax1.bar(x - width/2, kf_maes, width, label='KF', color='red', alpha=0.7)
     ax1.bar(x + width/2, bll_maes, width, label='BLL', color='blue', alpha=0.7)
     ax1.set_xlabel('Task')
     ax1.set_ylabel('Mean Absolute Error')
-    ax1.set_title('Prediction Accuracy by Task')
+    ax1.set_title('Absolute MAE by Task')
     ax1.set_xticks(x)
     ax1.set_xticklabels(tasks_labels)
     ax1.legend()
@@ -510,26 +588,42 @@ def plot_frozen_evaluation_results(
         ax1.text(i - width/2, kf_val, f'{kf_val:.4f}', ha='center', va='bottom', fontsize=8)
         ax1.text(i + width/2, bll_val, f'{bll_val:.4f}', ha='center', va='bottom', fontsize=8)
 
-    # Uncertainty comparison
-    ax2.bar(x - width/2, kf_uncs, width, label='KF', color='red', alpha=0.7)
-    ax2.bar(x + width/2, bll_uncs, width, label='BLL', color='blue', alpha=0.7)
+    # Normalized MAE comparison
+    ax2.bar(x - width/2, kf_nmaes, width, label='KF', color='red', alpha=0.7)
+    ax2.bar(x + width/2, bll_nmaes, width, label='BLL', color='blue', alpha=0.7)
     ax2.set_xlabel('Task')
-    ax2.set_ylabel('Mean Uncertainty (σ)')
-    ax2.set_title('Average Prediction Uncertainty by Task')
+    ax2.set_ylabel('Normalized MAE')
+    ax2.set_title('Normalized MAE by Task (÷ amplitude)')
     ax2.set_xticks(x)
     ax2.set_xticklabels(tasks_labels)
     ax2.legend()
     ax2.grid(True, alpha=0.3, axis='y')
 
     # Add value labels on bars
-    for i, (kf_val, bll_val) in enumerate(zip(kf_uncs, bll_uncs)):
+    for i, (kf_val, bll_val) in enumerate(zip(kf_nmaes, bll_nmaes)):
         ax2.text(i - width/2, kf_val, f'{kf_val:.4f}', ha='center', va='bottom', fontsize=8)
         ax2.text(i + width/2, bll_val, f'{bll_val:.4f}', ha='center', va='bottom', fontsize=8)
+
+    # Uncertainty comparison
+    ax3.bar(x - width/2, kf_uncs, width, label='KF', color='red', alpha=0.7)
+    ax3.bar(x + width/2, bll_uncs, width, label='BLL', color='blue', alpha=0.7)
+    ax3.set_xlabel('Task')
+    ax3.set_ylabel('Mean Uncertainty (σ)')
+    ax3.set_title('Average Prediction Uncertainty by Task')
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(tasks_labels)
+    ax3.legend()
+    ax3.grid(True, alpha=0.3, axis='y')
+
+    # Add value labels on bars
+    for i, (kf_val, bll_val) in enumerate(zip(kf_uncs, bll_uncs)):
+        ax3.text(i - width/2, kf_val, f'{kf_val:.4f}', ha='center', va='bottom', fontsize=8)
+        ax3.text(i + width/2, bll_val, f'{bll_val:.4f}', ha='center', va='bottom', fontsize=8)
 
     plt.tight_layout()
     plt.savefig("results/figures/Frozen_Eval_Summary.png", dpi=300, bbox_inches='tight')
     plt.show()
-    print("Plot saved to: results/figures/Frozen_Eval_Summary.png")
+    print("Summary plot saved to: results/figures/Frozen_Eval_Summary.png")
 
     print("\nAll plots generated successfully!")
 
