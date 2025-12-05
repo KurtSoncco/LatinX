@@ -64,7 +64,7 @@ def pretrain_kf_on_task0(
     task0_data: dict[str, np.ndarray],
     seq_len: int,
     verbose: bool = True,
-) -> None:
+) -> dict:
     """
     Pre-train Kalman Filter on Task 0 data using the frozen RNN.
 
@@ -72,6 +72,7 @@ def pretrain_kf_on_task0(
     1. Extracting features from the frozen RNN for each Task 0 sample
     2. Making predictions and updating KF parameters online
     3. Learning the Task 0 sine->cosine mapping
+    4. Collecting training metrics for analysis
 
     Args:
         rnn_model: Trained JAX RNN model for feature extraction
@@ -82,10 +83,18 @@ def pretrain_kf_on_task0(
         verbose: Whether to print progress
 
     Returns:
-        None (kf is updated in-place)
+        Dictionary containing training history:
+            - predictions: Predicted values at each step
+            - ground_truth: True values at each step
+            - errors: Prediction errors (absolute)
+            - uncertainties: Prediction uncertainties (std)
+            - weight_norms: L2 norm of weight vector at each step
+            - weight_means: Mean weight values at each step
+            - covariance_traces: Trace of covariance matrix at each step
 
     Example:
-        >>> pretrain_kf_on_task0(rnn_model, rnn_params, kf, task0_data, seq_len=10)
+        >>> history = pretrain_kf_on_task0(rnn_model, rnn_params, kf, task0_data, seq_len=10)
+        >>> plot_kf_training_history(history)
     """
     num_samples = len(task0_data["sine"]) - seq_len
 
@@ -93,6 +102,17 @@ def pretrain_kf_on_task0(
         print(f"Pre-training KF on {num_samples} samples from Task 0...")
 
     kf_buffer = deque(np.zeros(seq_len), maxlen=seq_len)
+
+    # Initialize history tracking
+    history = {
+        "predictions": [],
+        "ground_truth": [],
+        "errors": [],
+        "uncertainties": [],
+        "weight_norms": [],
+        "weight_means": [],
+        "covariance_traces": [],
+    }
 
     for t in range(num_samples):
         # Get data
@@ -109,10 +129,32 @@ def pretrain_kf_on_task0(
 
         # Train KF: predict then update
         y_pred = kf.predict(phi)
+        _, pred_std = kf.get_prediction_uncertainty()
         kf.update(y_t, y_pred)
+
+        # Collect metrics
+        error = abs(y_t - y_pred)
+        weights, _ = kf.get_weight_statistics()
+        weight_norm = float(jnp.linalg.norm(weights))
+        weight_mean = float(jnp.mean(weights))
+        cov_trace = float(jnp.trace(kf.P))
+
+        history["predictions"].append(y_pred)
+        history["ground_truth"].append(y_t)
+        history["errors"].append(error)
+        history["uncertainties"].append(pred_std)
+        history["weight_norms"].append(weight_norm)
+        history["weight_means"].append(weight_mean)
+        history["covariance_traces"].append(cov_trace)
 
     if verbose:
         print(f"KF pre-training complete on {num_samples} samples.")
+
+    # Convert lists to numpy arrays
+    for key in history:
+        history[key] = np.array(history[key])
+
+    return history
 
 
 def train_jax_rnn_on_task0(
@@ -270,8 +312,8 @@ def plot_frozen_evaluation_results(
     """
     Plot frozen model evaluation results for KF and BLL across tasks.
 
-    Creates separate plots for each task showing predictions, errors, and uncertainties,
-    plus a summary comparison plot.
+    Creates plots organized by metric type (predictions, errors, uncertainties)
+    showing all tasks with task boundaries marked.
 
     Args:
         eval_results: Dictionary containing evaluation results for each task
@@ -283,86 +325,159 @@ def plot_frozen_evaluation_results(
     """
     print("\nGenerating plots...")
 
-    # Create separate figure for each task
-    for task_idx, task in enumerate(tasks):
+    # Concatenate all task data
+    all_ground_truth = []
+    all_kf_preds = []
+    all_bll_preds = []
+    all_kf_errors = []
+    all_bll_errors = []
+    all_kf_uncertainties = []
+    all_bll_uncertainties = []
+
+    task_boundaries = [0]  # Start of first task
+
+    for task in tasks:
+        all_ground_truth.extend(eval_results[task]["ground_truth"])
+        all_kf_preds.extend(eval_results[task]["kf_predictions"])
+        all_bll_preds.extend(eval_results[task]["bll_predictions"])
+        all_kf_errors.extend(eval_results[task]["kf_errors"])
+        all_bll_errors.extend(eval_results[task]["bll_errors"])
+        all_kf_uncertainties.extend(eval_results[task]["kf_uncertainties"])
+        all_bll_uncertainties.extend(eval_results[task]["bll_uncertainties"])
+
+        # Add boundary at end of this task (start of next task)
+        task_boundaries.append(len(all_ground_truth))
+
+    # Convert to numpy arrays
+    all_ground_truth = np.array(all_ground_truth)
+    all_kf_preds = np.array(all_kf_preds)
+    all_bll_preds = np.array(all_bll_preds)
+    all_kf_errors = np.array(all_kf_errors)
+    all_bll_errors = np.array(all_bll_errors)
+    all_kf_uncertainties = np.array(all_kf_uncertainties)
+    all_bll_uncertainties = np.array(all_bll_uncertainties)
+
+    time_steps = np.arange(len(all_ground_truth))
+
+    # ==========================================
+    # Plot 1: Predictions vs Ground Truth
+    # ==========================================
+    fig1, ax1 = plt.subplots(1, 1, figsize=(14, 5))
+    fig1.suptitle("Frozen Model Evaluation: Predictions Across All Tasks", fontsize=14, fontweight="bold")
+
+    ax1.plot(time_steps, all_ground_truth, 'k-', label='Ground Truth', alpha=0.7, linewidth=2)
+    ax1.plot(time_steps, all_kf_preds, 'r--', label='Kalman Filter', alpha=0.8, linewidth=1.5)
+    ax1.plot(time_steps, all_bll_preds, 'b:', label='Bayesian Last Layer', alpha=0.8, linewidth=1.5)
+
+    # Add task boundaries and labels
+    for i, task in enumerate(tasks):
+        boundary = task_boundaries[i]
+        ax1.axvline(boundary, color='blue', linestyle=':', alpha=0.5, linewidth=2)
+
+        # Add task label in the middle of each task region
         task_config = task_configs[task]
-        task_label = f"Task {task}: A={task_config['amplitude']}, θ={task_config['angle_multiplier']}"
+        if i < len(tasks):
+            mid_point = (task_boundaries[i] + task_boundaries[i + 1]) / 2
+            task_label = f"Task {task}: Cosine\n(amplitude={task_config['amplitude']}, Training)" if task == 0 else \
+                        f"Task {task}: {task_config['amplitude']}x Cosine\n(amplitude={task_config['amplitude']}, Prediction Only)"
+            ax1.text(mid_point, ax1.get_ylim()[1] * 0.9, task_label,
+                    ha='center', va='top', fontsize=9, color='blue',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.7, edgecolor='blue'))
 
-        # Get data for this task
-        ground_truth = np.array(eval_results[task]["ground_truth"])
-        kf_preds = np.array(eval_results[task]["kf_predictions"])
-        bll_preds = np.array(eval_results[task]["bll_predictions"])
-        kf_errors = np.array(eval_results[task]["kf_errors"])
-        bll_errors = np.array(eval_results[task]["bll_errors"])
-        kf_uncertainties = np.array(eval_results[task]["kf_uncertainties"])
-        bll_uncertainties = np.array(eval_results[task]["bll_uncertainties"])
+    ax1.set_title('Predictions vs Ground Truth')
+    ax1.set_xlabel('Sample Index')
+    ax1.set_ylabel('Output Value')
+    ax1.legend(loc='upper right')
+    ax1.grid(True, alpha=0.3)
 
-        time_steps = np.arange(len(ground_truth))
+    plt.tight_layout()
+    output_file1 = "results/figures/Frozen_Eval_Predictions.png"
+    plt.savefig(output_file1, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Predictions plot saved to: {output_file1}")
 
-        # Create 1x3 subplot for this task
-        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-        fig.suptitle(f"Frozen Model Evaluation - {task_label}", fontsize=14, fontweight="bold")
+    # ==========================================
+    # Plot 2: Absolute Errors
+    # ==========================================
+    fig2, ax2 = plt.subplots(1, 1, figsize=(14, 5))
+    fig2.suptitle("Frozen Model Evaluation: Errors Across All Tasks", fontsize=14, fontweight="bold")
 
-        # ==========================================
-        # Column 1: Predictions vs Ground Truth
-        # ==========================================
-        ax1 = axes[0]
-        ax1.plot(time_steps, ground_truth, 'k-', label='Ground Truth', alpha=0.7, linewidth=2)
-        ax1.plot(time_steps, kf_preds, 'r--', label='KF', alpha=0.8, linewidth=1.5)
-        ax1.plot(time_steps, bll_preds, 'b:', label='BLL', alpha=0.8, linewidth=1.5)
-        ax1.set_title('Predictions vs Ground Truth')
-        ax1.set_xlabel('Sample Index')
-        ax1.set_ylabel('Output Value')
-        ax1.legend(loc='upper right')
-        ax1.grid(True, alpha=0.3)
+    ax2.plot(time_steps, all_kf_errors, 'r-', label='KF', alpha=0.7, linewidth=1.5)
+    ax2.plot(time_steps, all_bll_errors, 'b-', label='BLL', alpha=0.7, linewidth=1.5)
 
-        # ==========================================
-        # Column 2: Absolute Errors
-        # ==========================================
-        ax2 = axes[1]
-        ax2.plot(time_steps, kf_errors, 'r-', label='KF', alpha=0.7, linewidth=1.5)
-        ax2.plot(time_steps, bll_errors, 'b-', label='BLL', alpha=0.7, linewidth=1.5)
-        ax2.axhline(np.mean(kf_errors), color='r', linestyle='--', alpha=0.5, linewidth=1)
-        ax2.axhline(np.mean(bll_errors), color='b', linestyle='--', alpha=0.5, linewidth=1)
-        ax2.set_title('Absolute Errors')
-        ax2.set_xlabel('Sample Index')
-        ax2.set_ylabel('|Error|')
-        ax2.legend(loc='upper right')
-        ax2.grid(True, alpha=0.3)
+    # Add task boundaries
+    for i, task in enumerate(tasks):
+        boundary = task_boundaries[i]
+        ax2.axvline(boundary, color='blue', linestyle=':', alpha=0.5, linewidth=2)
 
-        # Add text with MAE
-        kf_mae = np.mean(kf_errors)
-        bll_mae = np.mean(bll_errors)
-        ax2.text(0.02, 0.98, f'KF MAE: {kf_mae:.4f}\nBLL MAE: {bll_mae:.4f}',
-                transform=ax2.transAxes, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+        # Add task label
+        task_config = task_configs[task]
+        if i < len(tasks):
+            mid_point = (task_boundaries[i] + task_boundaries[i + 1]) / 2
+            task_label = f"Task {task}"
+            ax2.text(mid_point, ax2.get_ylim()[1] * 0.9, task_label,
+                    ha='center', va='top', fontsize=9, color='blue',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.7, edgecolor='blue'))
 
-        # ==========================================
-        # Column 3: Prediction Uncertainties
-        # ==========================================
-        ax3 = axes[2]
-        ax3.plot(time_steps, kf_uncertainties, 'r-', label='KF σ', alpha=0.7, linewidth=1.5)
-        ax3.plot(time_steps, bll_uncertainties, 'b-', label='BLL σ', alpha=0.7, linewidth=1.5)
-        ax3.axhline(np.mean(kf_uncertainties), color='r', linestyle='--', alpha=0.5, linewidth=1)
-        ax3.axhline(np.mean(bll_uncertainties), color='b', linestyle='--', alpha=0.5, linewidth=1)
-        ax3.set_title('Prediction Uncertainty')
-        ax3.set_xlabel('Sample Index')
-        ax3.set_ylabel('Standard Deviation')
-        ax3.legend(loc='upper right')
-        ax3.grid(True, alpha=0.3)
+    ax2.set_title('Absolute Errors')
+    ax2.set_xlabel('Sample Index')
+    ax2.set_ylabel('|Error|')
+    ax2.legend(loc='upper right')
+    ax2.grid(True, alpha=0.3)
 
-        # Add text with mean uncertainty
-        kf_mean_unc = np.mean(kf_uncertainties)
-        bll_mean_unc = np.mean(bll_uncertainties)
-        ax3.text(0.02, 0.98, f'KF σ̄: {kf_mean_unc:.4f}\nBLL σ̄: {bll_mean_unc:.4f}',
-                transform=ax3.transAxes, verticalalignment='top',
-                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    # Add overall MAE text
+    kf_mae = np.mean(all_kf_errors)
+    bll_mae = np.mean(all_bll_errors)
+    ax2.text(0.02, 0.98, f'Overall KF MAE: {kf_mae:.4f}\nOverall BLL MAE: {bll_mae:.4f}',
+            transform=ax2.transAxes, verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
 
-        plt.tight_layout()
-        output_file = f"results/figures/Frozen_Eval_Task{task}.png"
-        plt.savefig(output_file, dpi=300, bbox_inches='tight')
-        plt.show()
-        print(f"Plot saved to: {output_file}")
+    plt.tight_layout()
+    output_file2 = "results/figures/Frozen_Eval_Errors.png"
+    plt.savefig(output_file2, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Errors plot saved to: {output_file2}")
+
+    # ==========================================
+    # Plot 3: Prediction Uncertainties
+    # ==========================================
+    fig3, ax3 = plt.subplots(1, 1, figsize=(14, 5))
+    fig3.suptitle("Frozen Model Evaluation: Uncertainties Across All Tasks", fontsize=14, fontweight="bold")
+
+    ax3.plot(time_steps, all_kf_uncertainties, 'r-', label='KF σ', alpha=0.7, linewidth=1.5)
+    ax3.plot(time_steps, all_bll_uncertainties, 'b-', label='BLL σ', alpha=0.7, linewidth=1.5)
+
+    # Add task boundaries
+    for i, task in enumerate(tasks):
+        boundary = task_boundaries[i]
+        ax3.axvline(boundary, color='blue', linestyle=':', alpha=0.5, linewidth=2)
+
+        # Add task label
+        if i < len(tasks):
+            mid_point = (task_boundaries[i] + task_boundaries[i + 1]) / 2
+            task_label = f"Task {task}"
+            ax3.text(mid_point, ax3.get_ylim()[1] * 0.9, task_label,
+                    ha='center', va='top', fontsize=9, color='blue',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.7, edgecolor='blue'))
+
+    ax3.set_title('Prediction Uncertainty')
+    ax3.set_xlabel('Sample Index')
+    ax3.set_ylabel('Standard Deviation')
+    ax3.legend(loc='upper right')
+    ax3.grid(True, alpha=0.3)
+
+    # Add overall mean uncertainty text
+    kf_mean_unc = np.mean(all_kf_uncertainties)
+    bll_mean_unc = np.mean(all_bll_uncertainties)
+    ax3.text(0.02, 0.98, f'Overall KF σ̄: {kf_mean_unc:.4f}\nOverall BLL σ̄: {bll_mean_unc:.4f}',
+            transform=ax3.transAxes, verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout()
+    output_file3 = "results/figures/Frozen_Eval_Uncertainties.png"
+    plt.savefig(output_file3, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Uncertainties plot saved to: {output_file3}")
 
     # ==========================================
     # Summary Bar Chart
@@ -417,6 +532,134 @@ def plot_frozen_evaluation_results(
     print("Plot saved to: results/figures/Frozen_Eval_Summary.png")
 
     print("\nAll plots generated successfully!")
+
+
+def plot_kf_training_history(
+    history: dict,
+    save_path: str = "results/figures/KF_Training_History.png",
+) -> None:
+    """
+    Plot Kalman Filter training history metrics.
+
+    Creates a 2x3 grid showing:
+    - Predictions vs ground truth with 3-sigma bounds
+    - Prediction errors over time
+    - Prediction uncertainty over time
+    - Weight vector L2 norm over time
+    - Mean weight value over time
+    - Covariance trace over time
+
+    Args:
+        history: Dictionary containing training metrics from pretrain_kf_on_task0
+        save_path: Path to save the figure
+
+    Example:
+        >>> history = pretrain_kf_on_task0(...)
+        >>> plot_kf_training_history(history)
+    """
+    print(f"\nPlotting KF training history...")
+
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig.suptitle("Kalman Filter Training History (Task 0)", fontsize=16, fontweight="bold")
+
+    time_steps = np.arange(len(history["predictions"]))
+    predictions = history["predictions"]
+    ground_truth = history["ground_truth"]
+    errors = history["errors"]
+    uncertainties = history["uncertainties"]
+    weight_norms = history["weight_norms"]
+    weight_means = history["weight_means"]
+    cov_traces = history["covariance_traces"]
+
+    # ==========================================
+    # Row 1, Col 1: Predictions vs Ground Truth with 3-sigma bounds
+    # ==========================================
+    ax1 = axes[0, 0]
+    ax1.plot(time_steps, ground_truth, 'k-', label='Ground Truth', alpha=0.7, linewidth=1.5)
+    ax1.plot(time_steps, predictions, 'r--', label='KF Prediction', alpha=0.8, linewidth=1.5)
+
+    # 3-sigma bounds
+    upper_bound = predictions + 3 * uncertainties
+    lower_bound = predictions - 3 * uncertainties
+    ax1.fill_between(time_steps, lower_bound, upper_bound,
+                     color='red', alpha=0.2, label='3σ bounds')
+
+    ax1.set_title('Predictions vs Ground Truth')
+    ax1.set_xlabel('Sample Index')
+    ax1.set_ylabel('Output Value')
+    ax1.legend(loc='upper right')
+    ax1.grid(True, alpha=0.3)
+
+    # ==========================================
+    # Row 1, Col 2: Prediction Errors
+    # ==========================================
+    ax2 = axes[0, 1]
+    ax2.plot(time_steps, errors, 'b-', alpha=0.7, linewidth=1.5)
+    ax2.axhline(np.mean(errors), color='b', linestyle='--',
+                alpha=0.5, linewidth=2, label=f'Mean: {np.mean(errors):.4f}')
+    ax2.set_title('Prediction Errors')
+    ax2.set_xlabel('Sample Index')
+    ax2.set_ylabel('Absolute Error')
+    ax2.legend(loc='upper right')
+    ax2.grid(True, alpha=0.3)
+
+    # ==========================================
+    # Row 1, Col 3: Prediction Uncertainty (σ)
+    # ==========================================
+    ax3 = axes[0, 2]
+    ax3.plot(time_steps, uncertainties, 'g-', alpha=0.7, linewidth=1.5)
+    ax3.axhline(np.mean(uncertainties), color='g', linestyle='--',
+                alpha=0.5, linewidth=2, label=f'Mean: {np.mean(uncertainties):.4f}')
+    ax3.set_title('Prediction Uncertainty (σ)')
+    ax3.set_xlabel('Sample Index')
+    ax3.set_ylabel('Standard Deviation')
+    ax3.legend(loc='upper right')
+    ax3.grid(True, alpha=0.3)
+
+    # ==========================================
+    # Row 2, Col 1: Weight Vector L2 Norm
+    # ==========================================
+    ax4 = axes[1, 0]
+    ax4.plot(time_steps, weight_norms, 'purple', alpha=0.7, linewidth=1.5)
+    ax4.axhline(weight_norms[-1], color='purple', linestyle='--',
+                alpha=0.5, linewidth=2, label=f'Final: {weight_norms[-1]:.4f}')
+    ax4.set_title('Weight Vector L2 Norm')
+    ax4.set_xlabel('Sample Index')
+    ax4.set_ylabel('||w||₂')
+    ax4.legend(loc='upper right')
+    ax4.grid(True, alpha=0.3)
+
+    # ==========================================
+    # Row 2, Col 2: Mean Weight Value
+    # ==========================================
+    ax5 = axes[1, 1]
+    ax5.plot(time_steps, weight_means, 'orange', alpha=0.7, linewidth=1.5)
+    ax5.axhline(0, color='k', linestyle='-', alpha=0.3, linewidth=1)
+    ax5.axhline(weight_means[-1], color='orange', linestyle='--',
+                alpha=0.5, linewidth=2, label=f'Final: {weight_means[-1]:.4f}')
+    ax5.set_title('Mean Weight Value')
+    ax5.set_xlabel('Sample Index')
+    ax5.set_ylabel('mean(w)')
+    ax5.legend(loc='upper right')
+    ax5.grid(True, alpha=0.3)
+
+    # ==========================================
+    # Row 2, Col 3: Covariance Trace
+    # ==========================================
+    ax6 = axes[1, 2]
+    ax6.plot(time_steps, cov_traces, 'brown', alpha=0.7, linewidth=1.5)
+    ax6.axhline(cov_traces[-1], color='brown', linestyle='--',
+                alpha=0.5, linewidth=2, label=f'Final: {cov_traces[-1]:.4f}')
+    ax6.set_title('Covariance Matrix Trace')
+    ax6.set_xlabel('Sample Index')
+    ax6.set_ylabel('tr(P)')
+    ax6.legend(loc='upper right')
+    ax6.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"KF training history plot saved to: {save_path}")
 
 
 def plot_trajectory_comparison(
@@ -741,7 +984,7 @@ if __name__ == "__main__":
     # PRE-TRAIN KF ON TASK 0 DATA (ONLINE)
     # ==========================================
     task0_train_data = train_cache[0]
-    pretrain_kf_on_task0(
+    kf_training_history = pretrain_kf_on_task0(
         rnn_model=rnn_model,
         rnn_params=rnn_params,
         kf=kf,
@@ -875,6 +1118,10 @@ if __name__ == "__main__":
     print("\nEvaluation complete! Results stored in eval_results dictionary.")
 
     # ==========================================
-    # 7. PLOTTING EVALUATION RESULTS
+    # 7. PLOTTING RESULTS
     # ==========================================
+    # Plot KF training history
+    plot_kf_training_history(kf_training_history)
+
+    # Plot frozen evaluation results
     plot_frozen_evaluation_results(eval_results, TASKS, TASK_CONFIGS)
