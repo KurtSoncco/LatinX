@@ -30,9 +30,9 @@ from latinx.models.standalone_bayesian_last_layer import StandaloneBayesianLastL
 
 # Task configuration: cleaner and more maintainable
 TASK_CONFIGS: dict[int, dict[str, float]] = {
-    0: {"amplitude": 1.0, "angle_multiplier": 10},
-    1: {"amplitude": 0.5, "angle_multiplier": 10},
-    2: {"amplitude": -1.5, "angle_multiplier": 10},
+    0: {"amplitude": 1.0, "angle_multiplier": 2},
+    1: {"amplitude": 0.5, "angle_multiplier": 2},
+    2: {"amplitude": 0.3, "angle_multiplier": 2},
 }
 
 def _build_task_translators(num_samples: int) -> dict[int, dict[str, np.ndarray]]:
@@ -335,6 +335,8 @@ def plot_frozen_evaluation_results(
     all_bll_errors_normalized = []
     all_kf_uncertainties = []
     all_bll_uncertainties = []
+    all_kf_uncertainties_normalized = []
+    all_bll_uncertainties_normalized = []
 
     task_boundaries = [0]  # Start of first task
 
@@ -346,10 +348,16 @@ def plot_frozen_evaluation_results(
         ground_truth = eval_results[task]["ground_truth"]
         kf_errors = eval_results[task]["kf_errors"]
         bll_errors = eval_results[task]["bll_errors"]
+        kf_uncertainties = eval_results[task]["kf_uncertainties"]
+        bll_uncertainties = eval_results[task]["bll_uncertainties"]
 
         # Normalize errors by amplitude
         kf_errors_norm = [err / amplitude for err in kf_errors]
         bll_errors_norm = [err / amplitude for err in bll_errors]
+
+        # Normalize uncertainties by amplitude
+        kf_uncertainties_norm = [unc / amplitude for unc in kf_uncertainties]
+        bll_uncertainties_norm = [unc / amplitude for unc in bll_uncertainties]
 
         all_ground_truth.extend(ground_truth)
         all_kf_preds.extend(eval_results[task]["kf_predictions"])
@@ -358,8 +366,10 @@ def plot_frozen_evaluation_results(
         all_bll_errors.extend(bll_errors)
         all_kf_errors_normalized.extend(kf_errors_norm)
         all_bll_errors_normalized.extend(bll_errors_norm)
-        all_kf_uncertainties.extend(eval_results[task]["kf_uncertainties"])
-        all_bll_uncertainties.extend(eval_results[task]["bll_uncertainties"])
+        all_kf_uncertainties.extend(kf_uncertainties)
+        all_bll_uncertainties.extend(bll_uncertainties)
+        all_kf_uncertainties_normalized.extend(kf_uncertainties_norm)
+        all_bll_uncertainties_normalized.extend(bll_uncertainties_norm)
 
         # Add boundary at end of this task (start of next task)
         task_boundaries.append(len(all_ground_truth))
@@ -374,6 +384,8 @@ def plot_frozen_evaluation_results(
     all_bll_errors_normalized = np.array(all_bll_errors_normalized)
     all_kf_uncertainties = np.array(all_kf_uncertainties)
     all_bll_uncertainties = np.array(all_bll_uncertainties)
+    all_kf_uncertainties_normalized = np.array(all_kf_uncertainties_normalized)
+    all_bll_uncertainties_normalized = np.array(all_bll_uncertainties_normalized)
 
     time_steps = np.arange(len(all_ground_truth))
 
@@ -538,6 +550,48 @@ def plot_frozen_evaluation_results(
     plt.savefig(output_file4, dpi=300, bbox_inches='tight')
     plt.show()
     print(f"Uncertainties plot saved to: {output_file4}")
+
+    # ==========================================
+    # Plot 5: Normalized Uncertainties (by amplitude)
+    # ==========================================
+    fig6, ax6 = plt.subplots(1, 1, figsize=(14, 5))
+    fig6.suptitle("Frozen Model Evaluation: Normalized Uncertainties Across All Tasks", fontsize=14, fontweight="bold")
+
+    ax6.plot(time_steps, all_kf_uncertainties_normalized, 'r-', label='KF σ', alpha=0.7, linewidth=1.5)
+    ax6.plot(time_steps, all_bll_uncertainties_normalized, 'b-', label='BLL σ', alpha=0.7, linewidth=1.5)
+
+    # Add task boundaries
+    for i, task in enumerate(tasks):
+        boundary = task_boundaries[i]
+        ax6.axvline(boundary, color='blue', linestyle=':', alpha=0.5, linewidth=2)
+
+        # Add task label
+        task_config = task_configs[task]
+        if i < len(tasks):
+            mid_point = (task_boundaries[i] + task_boundaries[i + 1]) / 2
+            task_label = f"Task {task}\n(A={task_config['amplitude']})"
+            ax6.text(mid_point, ax6.get_ylim()[1] * 0.9, task_label,
+                    ha='center', va='top', fontsize=9, color='blue',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.7, edgecolor='blue'))
+
+    ax6.set_title('Normalized Prediction Uncertainty (÷ amplitude)')
+    ax6.set_xlabel('Sample Index')
+    ax6.set_ylabel('Normalized σ')
+    ax6.legend(loc='upper right')
+    ax6.grid(True, alpha=0.3)
+
+    # Add overall normalized mean uncertainty text
+    kf_mean_unc_norm = np.mean(all_kf_uncertainties_normalized)
+    bll_mean_unc_norm = np.mean(all_bll_uncertainties_normalized)
+    ax6.text(0.02, 0.98, f'Overall KF σ̄: {kf_mean_unc_norm:.4f}\nOverall BLL σ̄: {bll_mean_unc_norm:.4f}',
+            transform=ax6.transAxes, verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout()
+    output_file6 = "results/figures/Frozen_Eval_Uncertainties_Normalized.png"
+    plt.savefig(output_file6, dpi=300, bbox_inches='tight')
+    plt.show()
+    print(f"Normalized uncertainties plot saved to: {output_file6}")
 
     # ==========================================
     # Summary Bar Chart
@@ -1062,17 +1116,26 @@ if __name__ == "__main__":
     # ==========================================
     print("Phase 2: Online Bayesian Adaptation across Multiple Functions...")
 
+    Q = 0.3
+    RHO = 1.0
+    ALPHA = 0.05
+    MEASUREMENT_STD = 0.05 #observation/measurement standard deviation
+    """
+    Set These params to verify BLL and KF are equivalent when params are right (Sanity Check)
+    Q = 0.0
+    RHO = 1.0
+    """
 
     # Initialize the Bayesian Heads
     # KF and BLL configured for equivalence: Q=0, rho=1.0, matching prior
     kf = KalmanFilterHead(
         feature_dim=HIDDEN_SIZE,
-        rho=1.0,  # No forgetting (equivalent to batch learning)
-        Q_std=0.0,  # No process noise (KEY for KF-BLL equivalence)
-        R_std=0.1,  # Observation noise std
-        initial_uncertainty=20.0,  # 1/alpha = 1/0.05 (match BLL prior)
+        rho=RHO,  # No forgetting (equivalent to batch learning)
+        Q_std=Q,  # No process noise (KEY for KF-BLL equivalence)
+        R_std=MEASUREMENT_STD,  # Observation noise std
+        initial_uncertainty=1/ALPHA,  # 1/alpha = 1/0.05 (match BLL prior)
     )
-    bll = StandaloneBayesianLastLayer(sigma=0.1, alpha=0.05, feature_dim=HIDDEN_SIZE)
+    bll = StandaloneBayesianLastLayer(sigma=MEASUREMENT_STD, alpha=ALPHA, feature_dim=HIDDEN_SIZE)
 
     # ==========================================
     # PRE-TRAIN KF ON TASK 0 DATA (ONLINE)
