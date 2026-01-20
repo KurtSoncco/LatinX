@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
+from pathlib import Path
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -440,6 +441,9 @@ def plot_comparison_results(
     """
     Plot comparison of BLL and KF results across different Q values.
     """
+    # Create save directory if it doesn't exist
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle(
         "BLL vs KF Comparison: Mean Prediction and Std Dev Across Q Values",
@@ -519,6 +523,9 @@ def plot_detailed_metrics_all_q(
     - Innovation and innovation covariance history (KF only)
     - Kalman gain history (KF only)
     """
+    # Create save directory if it doesn't exist
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
+
     # Get reference dimensions from first Q value
     first_q = q_values[0]
     ref_data = all_q_data[first_q]
@@ -868,6 +875,9 @@ def plot_detailed_metrics(
     - Innovation and innovation covariance history (KF only)
     - Kalman gain history (KF only)
     """
+    # Create save directory if it doesn't exist
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
+
     # Combine training and evaluation data
     train_steps = len(kf_train_history["predictions"])
     eval_steps_task1 = len(kf_eval_results[1]["kf_predictions"])
