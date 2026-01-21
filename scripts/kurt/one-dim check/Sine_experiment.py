@@ -26,11 +26,20 @@ TASK_CONFIGS: dict[int, dict[str, float]] = {
 }
 
 
-def _build_task_translators(num_samples: int) -> dict[int, dict[str, np.ndarray]]:
+def _build_task_translators(
+    num_samples: int, t_start: float = 0.0, dt: float = 0.05
+) -> dict[int, dict[str, np.ndarray]]:
     """
-    Build per-task translators and return precomputed arrays for indexing.
+    Build per-task translators with continuous time axis.
 
-    Returns a dict mapping task_id -> {"t": np.ndarray, "sine": np.ndarray, "cosine": np.ndarray}.
+    Args:
+        num_samples: Number of samples to generate for each task.
+        t_start: Starting time value (default 0.0). Use this to continue time from a previous call.
+        dt: Time step between samples (default 0.05).
+
+    Returns:
+        dict mapping task_id -> {"t": np.ndarray, "sine": np.ndarray, "cosine": np.ndarray}.
+        All tasks share the same continuous time axis, only amplitude/angle_multiplier differ.
     """
     cache: dict[int, dict[str, np.ndarray]] = {}
     for tid, cfg in TASK_CONFIGS.items():
@@ -38,8 +47,9 @@ def _build_task_translators(num_samples: int) -> dict[int, dict[str, np.ndarray]
             amplitude=cfg["amplitude"],
             angle_multiplier=cfg["angle_multiplier"],
             num_samples=num_samples,
+            t_start=t_start,  # Pass continuous time start
         )
-        df = translator.generate()
+        df = translator.generate(dt=dt)
         cache[tid] = {
             "t": np.asarray(df["t"].values, dtype=np.float64),
             "sine": np.asarray(df["sine"].values, dtype=np.float64),
@@ -1247,6 +1257,7 @@ if __name__ == "__main__":
     SEQ_LEN = 10
     HIDDEN_SIZE = 32
     SAMPLES_PER_TASK = 600  # Same number of samples for all tasks
+    DT = 0.05  # Time step for continuous time axis
     RHO = 1.0
     ALPHA = 0.05
     MEASUREMENT_STD = 0.05
@@ -1267,7 +1278,7 @@ if __name__ == "__main__":
     # Phase 1: Train RNN on Task 0
     # ==========================================
     print("\nPhase 1: Training RNN on Task 0...")
-    train_cache = _build_task_translators(num_samples=SAMPLES_PER_TASK)
+    train_cache = _build_task_translators(num_samples=SAMPLES_PER_TASK, dt=DT)
     rnn_model, rnn_params = train_jax_rnn_on_task0(
         data_cache=train_cache,
         seq_len=SEQ_LEN,
@@ -1299,7 +1310,9 @@ if __name__ == "__main__":
     comparison_results = {}
     all_q_data = {}  # Store all training and evaluation data for plotting
     # Use same number of samples for all tasks
-    eval_cache = _build_task_translators(num_samples=SAMPLES_PER_TASK)
+    # Continue time axis from where training ended to avoid phase discontinuity
+    T_TRAIN_END = SAMPLES_PER_TASK * DT
+    eval_cache = _build_task_translators(num_samples=SAMPLES_PER_TASK, t_start=T_TRAIN_END, dt=DT)
 
     for q_val in Q_VALUES:
         print(f"\n{'=' * 70}")
