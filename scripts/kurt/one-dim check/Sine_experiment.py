@@ -167,7 +167,7 @@ def pretrain_kf_on_task0(
             - history: Dictionary with training history
             - final_buffer: List of last seq_len values for initializing next task
     """
-    num_samples = len(task0_data["sine"]) - seq_len
+    num_samples = len(task0_data["sine"])
 
     if verbose:
         print(f"Pre-training KF on {num_samples} samples from Task 0...")
@@ -240,7 +240,7 @@ def pretrain_bll_on_task0(
         Dictionary with training history including predictions, uncertainties,
         and covariance norms (after fitting).
     """
-    num_samples = len(task0_data["sine"]) - seq_len
+    num_samples = len(task0_data["sine"])
 
     if verbose:
         print(f"Pre-training BLL on {num_samples} samples from Task 0...")
@@ -367,7 +367,7 @@ def evaluate_on_tasks(
             print(f"\nEvaluating on Task {task}...")
 
         data = eval_cache[task]
-        num_eval_samples = len(data["sine"]) - seq_len
+        num_eval_samples = len(data["sine"])
 
         # Initialize buffer based on task position
         if task_idx == 0 and initial_buffer is not None:
