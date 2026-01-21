@@ -158,13 +158,14 @@ def pretrain_kf_on_task0(
     task0_data: dict[str, np.ndarray],
     seq_len: int,
     verbose: bool = True,
-) -> dict:
+) -> tuple[dict, list]:
     """
     Pre-train Kalman Filter on Task 0 data using the frozen RNN.
 
     Returns:
-        Dictionary with training history including predictions, uncertainties,
-        covariance norms, innovation, innovation covariance, and Kalman gain.
+        Tuple of (history, final_buffer) where:
+            - history: Dictionary with training history
+            - final_buffer: List of last seq_len values for initializing next task
     """
     num_samples = len(task0_data["sine"]) - seq_len
 
@@ -219,7 +220,9 @@ def pretrain_kf_on_task0(
     if verbose:
         print(f"KF pre-training complete on {num_samples} samples.")
 
-    return history
+    # Return history and final buffer state for continuity to next task
+    final_buffer = list(kf_buffer)
+    return history, final_buffer
 
 
 def pretrain_bll_on_task0(
@@ -315,10 +318,15 @@ def evaluate_on_tasks(
     eval_cache: dict[int, dict[str, np.ndarray]],
     tasks: list[int],
     seq_len: int,
+    initial_buffer: list | None = None,
     verbose: bool = True,
 ) -> dict[int, dict]:
     """
     Evaluate KF and BLL on specified tasks (prediction only, no updates).
+
+    Args:
+        initial_buffer: Optional list of seq_len values to initialize first task's buffer
+                       (for continuity from previous task/training)
 
     Returns:
         Dictionary mapping task_id -> {
@@ -351,13 +359,26 @@ def evaluate_on_tasks(
         for task_id in tasks
     }
 
-    for task in tasks:
+    # Keep track of buffer between tasks for continuity
+    task_buffer = None
+
+    for task_idx, task in enumerate(tasks):
         if verbose:
             print(f"\nEvaluating on Task {task}...")
 
         data = eval_cache[task]
         num_eval_samples = len(data["sine"]) - seq_len
-        eval_buffer = deque(np.zeros(seq_len), maxlen=seq_len)
+
+        # Initialize buffer based on task position
+        if task_idx == 0 and initial_buffer is not None:
+            # First task: use provided initial buffer from training
+            eval_buffer = deque(initial_buffer, maxlen=seq_len)
+        elif task_idx > 0 and task_buffer is not None:
+            # Subsequent tasks: use buffer from previous task
+            eval_buffer = deque(task_buffer, maxlen=seq_len)
+        else:
+            # Fallback: start with zeros
+            eval_buffer = deque(np.zeros(seq_len), maxlen=seq_len)
 
         for t in range(num_eval_samples):
             x_t = float(data["sine"][t])
@@ -415,6 +436,9 @@ def evaluate_on_tasks(
             bll_std = np.std(eval_results[task]["bll_predictions"])
             print(f"  Task {task} - KF: mean={kf_mean:.6f}, std={kf_std:.6f}")
             print(f"  Task {task} - BLL: mean={bll_mean:.6f}, std={bll_std:.6f}")
+
+        # Save last buffer of the current task for next one
+        task_buffer = list(eval_buffer)
 
     return eval_results
 
@@ -1498,12 +1522,12 @@ if __name__ == "__main__":
             initial_uncertainty=1 / ALPHA,
         )
 
-        # Pre-train KF on Task 0 (returns history)
-        kf_train_history = pretrain_kf_on_task0(
+        # Pre-train KF on Task 0 (returns history and final buffer)
+        kf_train_history, task0_final_buffer = pretrain_kf_on_task0(
             rnn_model, rnn_params, kf, task0_train_data, SEQ_LEN, verbose=True
         )
 
-        # Evaluate on Tasks 1 and 2 (prediction only)
+        # Evaluate on Tasks 1 and 2 (prediction only), using buffer from Task 0
         eval_results = evaluate_on_tasks(
             rnn_model,
             rnn_params,
@@ -1512,6 +1536,7 @@ if __name__ == "__main__":
             eval_cache,
             tasks=[1, 2],
             seq_len=SEQ_LEN,
+            initial_buffer=task0_final_buffer,
             verbose=True,
         )
 
