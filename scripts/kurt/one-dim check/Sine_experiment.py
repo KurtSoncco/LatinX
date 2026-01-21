@@ -21,7 +21,7 @@ from latinx.models.standalone_bayesian_last_layer import StandaloneBayesianLastL
 # Task configuration: sinx -> cosx, sin0.5x -> cos0.5x, sin2x -> cos2x
 TASK_CONFIGS: dict[int, dict[str, float]] = {
     0: {"amplitude": 1.0, "angle_multiplier": 1.0},  # sinx -> cosx
-    1: {"amplitude": 1.0, "angle_multiplier": 0.5},  # sin0.5x -> cos0.5x
+    1: {"amplitude": 1.0, "angle_multiplier": 1.0},  # sin0.5x -> cos0.5x
     2: {"amplitude": 1.0, "angle_multiplier": 2.0},  # sin2x -> cos2x
 }
 
@@ -182,6 +182,7 @@ def pretrain_kf_on_task0(
         "innovation": [],
         "innovation_covariance": [],
         "kalman_gain_norms": [],
+        "phi_norms": [],  # Track feature vector norms
     }
 
     for t in range(num_samples):
@@ -212,6 +213,8 @@ def pretrain_kf_on_task0(
         history["kalman_gain_norms"].append(
             float(jnp.linalg.norm(kf.K)) if kf.K is not None else 0.0
         )
+        # Track phi norm (features vector norm)
+        history["phi_norms"].append(float(jnp.linalg.norm(phi)))
 
     if verbose:
         print(f"KF pre-training complete on {num_samples} samples.")
@@ -343,6 +346,7 @@ def evaluate_on_tasks(
             "kf_innovation": [],
             "kf_innovation_covariance": [],
             "kf_kalman_gain_norms": [],
+            "phi_norms": [],  # Track feature vector norms
         }
         for task_id in tasks
     }
@@ -401,6 +405,8 @@ def evaluate_on_tasks(
             eval_results[task]["kf_kalman_gain_norms"].append(
                 float(jnp.linalg.norm(kf.K)) if kf.K is not None else 0.0
             )
+            # Track phi norm
+            eval_results[task]["phi_norms"].append(float(jnp.linalg.norm(phi_kf)))
 
         if verbose:
             kf_mean = np.mean(eval_results[task]["kf_predictions"])
@@ -867,6 +873,170 @@ def plot_detailed_metrics_all_q(
     plt.show()
 
     print(f"\nAll summary plots saved to: {save_dir}/")
+
+
+def plot_uncertainty_vs_phi_norm(
+    all_q_data: dict[float, dict],
+    q_values: list[float],
+    save_dir: str = "results/figures",
+) -> None:
+    """
+    Plot KF uncertainty (±1σ band) and phi_x norm over time for all Q values.
+
+    Creates a 2-panel plot:
+    - Top: Uncertainty bands showing predictions ± 1σ for each Q value
+    - Bottom: Phi (feature vector) norm over time for each Q value
+
+    Args:
+        all_q_data: Dictionary containing all Q value data
+        q_values: List of Q values tested
+        save_dir: Directory to save plots
+    """
+    # Create save directory if it doesn't exist
+    Path(save_dir).mkdir(parents=True, exist_ok=True)
+
+    # Get reference dimensions
+    first_q = q_values[0]
+    ref_data = all_q_data[first_q]
+    train_steps = len(ref_data["kf_train_history"]["predictions"])
+    eval_steps_task1 = len(ref_data["kf_eval_results"][1]["kf_predictions"])
+    eval_steps_task2 = len(ref_data["kf_eval_results"][2]["kf_predictions"])
+    total_steps = train_steps + eval_steps_task1 + eval_steps_task2
+
+    time_axis = np.arange(total_steps)
+    task_boundaries = [train_steps, train_steps + eval_steps_task1]
+
+    # Color map for different Q values
+    import matplotlib.cm as cm
+    colors = cm.get_cmap("viridis")(np.linspace(0, 1, len(q_values)))
+
+    # Create figure with 2 subplots
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10))
+    fig.suptitle(
+        "KF Uncertainty and Feature Norm vs Time (All Q Values)",
+        fontsize=14,
+        fontweight="bold",
+    )
+
+    # Get ground truth (same for all Q)
+    ref_gt = (
+        ref_data["kf_train_history"]["ground_truth"]
+        + ref_data["kf_eval_results"][1]["ground_truth"]
+        + ref_data["kf_eval_results"][2]["ground_truth"]
+    )
+
+    # ==========================================
+    # Panel 1: Predictions with ±1σ uncertainty bands
+    # ==========================================
+    ax1.plot(time_axis, ref_gt, "k-", label="Ground Truth", alpha=0.7, linewidth=2)
+
+    for i, q_val in enumerate(q_values):
+        data = all_q_data[q_val]
+
+        # Concatenate training and evaluation data
+        kf_preds = (
+            data["kf_train_history"]["predictions"]
+            + data["kf_eval_results"][1]["kf_predictions"]
+            + data["kf_eval_results"][2]["kf_predictions"]
+        )
+        kf_unc = (
+            data["kf_train_history"]["uncertainties"]
+            + data["kf_eval_results"][1]["kf_uncertainties"]
+            + data["kf_eval_results"][2]["kf_uncertainties"]
+        )
+
+        kf_preds = np.array(kf_preds)
+        kf_unc = np.array(kf_unc)
+
+        # Plot prediction line
+        ax1.plot(
+            time_axis,
+            kf_preds,
+            "--",
+            label=f"KF Q={q_val}",
+            color=colors[i],
+            alpha=0.7,
+            linewidth=1.5,
+        )
+
+        # Plot ±1σ uncertainty band
+        upper = kf_preds + kf_unc
+        lower = kf_preds - kf_unc
+        ax1.fill_between(time_axis, lower, upper, color=colors[i], alpha=0.15)
+
+    # Add task boundaries
+    for boundary in task_boundaries:
+        ax1.axvline(boundary, color="blue", linestyle=":", alpha=0.5, linewidth=2)
+
+    # Add task labels
+    ax1.text(
+        train_steps / 2,
+        ax1.get_ylim()[1] * 0.95,
+        "Task 0\n(Training)",
+        ha="center",
+        fontsize=9,
+        bbox={"boxstyle": "round", "facecolor": "lightblue", "alpha": 0.7},
+    )
+    ax1.text(
+        train_steps + eval_steps_task1 / 2,
+        ax1.get_ylim()[1] * 0.95,
+        "Task 1\n(Eval)",
+        ha="center",
+        fontsize=9,
+        bbox={"boxstyle": "round", "facecolor": "lightgreen", "alpha": 0.7},
+    )
+    ax1.text(
+        train_steps + eval_steps_task1 + eval_steps_task2 / 2,
+        ax1.get_ylim()[1] * 0.95,
+        "Task 2\n(Eval)",
+        ha="center",
+        fontsize=9,
+        bbox={"boxstyle": "round", "facecolor": "lightyellow", "alpha": 0.7},
+    )
+
+    ax1.set_ylabel("Prediction Value")
+    ax1.legend(loc="upper right", ncol=3, fontsize=7)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_title("KF Predictions with ±1σ Uncertainty Bands")
+
+    # ==========================================
+    # Panel 2: Phi (feature vector) norm over time
+    # ==========================================
+    for i, q_val in enumerate(q_values):
+        data = all_q_data[q_val]
+
+        # Concatenate phi norms
+        phi_norms = (
+            data["kf_train_history"]["phi_norms"]
+            + data["kf_eval_results"][1]["phi_norms"]
+            + data["kf_eval_results"][2]["phi_norms"]
+        )
+
+        ax2.plot(
+            time_axis,
+            phi_norms,
+            "-",
+            label=f"Q={q_val}",
+            color=colors[i],
+            alpha=0.7,
+            linewidth=1.5,
+        )
+
+    # Add task boundaries
+    for boundary in task_boundaries:
+        ax2.axvline(boundary, color="blue", linestyle=":", alpha=0.5, linewidth=2)
+
+    ax2.set_xlabel("Time Step")
+    ax2.set_ylabel("||φ(x)||₂ (Feature Norm)")
+    ax2.legend(loc="upper right", ncol=3, fontsize=7)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_title("Feature Vector Norm (φ) Over Time")
+
+    plt.tight_layout()
+    plt.savefig(f"{save_dir}/KF_Uncertainty_vs_Phi_Norm_All_Q.png", dpi=300, bbox_inches="tight")
+    plt.show()
+
+    print(f"Uncertainty vs Phi norm plot saved to: {save_dir}/KF_Uncertainty_vs_Phi_Norm_All_Q.png")
 
 
 def plot_detailed_metrics(
@@ -1378,7 +1548,15 @@ if __name__ == "__main__":
     plot_detailed_metrics_all_q(all_q_data, Q_VALUES, save_dir="results/figures")
 
     # ==========================================
-    # Phase 3: Plot Results
+    # Phase 4: Plot Uncertainty vs Phi Norm
+    # ==========================================
+    print("\n" + "=" * 70)
+    print("Generating uncertainty vs phi norm plot...")
+    print("=" * 70)
+    plot_uncertainty_vs_phi_norm(all_q_data, Q_VALUES, save_dir="results/figures")
+
+    # ==========================================
+    # Phase 5: Plot Results
     # ==========================================
     print("\n" + "=" * 70)
     print("Generating comparison plots...")
