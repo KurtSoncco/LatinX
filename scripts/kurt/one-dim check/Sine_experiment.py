@@ -20,9 +20,9 @@ from latinx.models.standalone_bayesian_last_layer import StandaloneBayesianLastL
 
 # Task configuration: sinx -> cosx, sin0.5x -> cos0.5x, sin2x -> cos2x
 TASK_CONFIGS: dict[int, dict[str, float]] = {
-    0: {"amplitude": 1.0, "angle_multiplier": 1.0},  # sinx -> cosx
-    1: {"amplitude": 1.0, "angle_multiplier": 1.0},  # sin0.5x -> cos0.5x
-    2: {"amplitude": 1.0, "angle_multiplier": 2.0},  # sin2x -> cos2x
+    0: {"amplitude": 1.0, "angle_multiplier": 1.0}, 
+    1: {"amplitude": 1.0, "angle_multiplier": 1.5},  
+    2: {"amplitude": 1.0, "angle_multiplier": 2.0}, 
 }
 
 
@@ -319,14 +319,17 @@ def evaluate_on_tasks(
     tasks: list[int],
     seq_len: int,
     initial_buffer: list | None = None,
+    update_kf: bool = False,
     verbose: bool = True,
 ) -> dict[int, dict]:
     """
-    Evaluate KF and BLL on specified tasks (prediction only, no updates).
+    Evaluate KF and BLL on specified tasks.
 
     Args:
         initial_buffer: Optional list of seq_len values to initialize first task's buffer
                        (for continuity from previous task/training)
+        update_kf: If True, update KF weights during evaluation (online learning).
+                  If False, KF is frozen (prediction only).
 
     Returns:
         Dictionary mapping task_id -> {
@@ -391,17 +394,21 @@ def evaluate_on_tasks(
             phi_kf = features_array.T
             phi_bll = features_array
 
-            # KF prediction (no update)
+            # KF prediction
             kf_pred = kf.predict(phi_kf)
             _, kf_uncertainty = kf.get_prediction_uncertainty()
 
-            # Compute innovation (prediction error) without updating
+            # Compute innovation (prediction error)
             kf_innovation = y_t - kf_pred
             # Innovation covariance from predicted state
             if kf.H is not None and kf.P_minus is not None:
                 kf_innovation_cov = float((kf.H @ kf.P_minus @ kf.H.T + kf.R)[0, 0])
             else:
                 kf_innovation_cov = 0.0
+
+            # Optionally update KF if online learning is enabled
+            if update_kf:
+                kf.update(y_t, kf_pred)
 
             # BLL prediction
             bll_pred, bll_uncertainty = bll.predict(phi_bll, return_std=True)
@@ -1459,6 +1466,9 @@ if __name__ == "__main__":
     # Q values to test: start with 0, then increase
     Q_VALUES = [0.0, 0.01, 0.05, 0.1, 0.2, 0.3, 0.5]
 
+    # KF Update Mode: Set to True for online learning during eval, False for frozen
+    UPDATE_KF_DURING_EVAL = True
+
     print("=" * 70)
     print("BLL vs KF Comparison Experiment")
     print("=" * 70)
@@ -1466,6 +1476,8 @@ if __name__ == "__main__":
     print("Task 1: sin0.5x -> cos0.5x (prediction)")
     print("Task 2: sin2x -> cos2x (prediction)")
     print(f"Q values to test: {Q_VALUES}")
+    kf_mode = "ONLINE (updating)" if UPDATE_KF_DURING_EVAL else "FROZEN (no updates)"
+    print(f"KF Evaluation Mode: {kf_mode}")
     print("=" * 70)
 
     # ==========================================
@@ -1527,7 +1539,7 @@ if __name__ == "__main__":
             rnn_model, rnn_params, kf, task0_train_data, SEQ_LEN, verbose=True
         )
 
-        # Evaluate on Tasks 1 and 2 (prediction only), using buffer from Task 0
+        # Evaluate on Tasks 1 and 2, using buffer from Task 0
         eval_results = evaluate_on_tasks(
             rnn_model,
             rnn_params,
@@ -1537,6 +1549,7 @@ if __name__ == "__main__":
             tasks=[1, 2],
             seq_len=SEQ_LEN,
             initial_buffer=task0_final_buffer,
+            update_kf=UPDATE_KF_DURING_EVAL,
             verbose=True,
         )
 
