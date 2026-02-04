@@ -1,12 +1,14 @@
 from __future__ import annotations
-
+import logging
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional, Tuple
-
+import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
+import time
+from latinx.models.eft_linear_fft import ELFForecaster, ELFForecasterConfig
 
-
+import matplotlib.pyplot as plt
 # -------------------------
 # Reusable window dataset
 # -------------------------
@@ -185,11 +187,54 @@ def run_chronos_over_loader(
     }
 
 
-# -------------------------
-# Example usage
-# -------------------------
+
+
+def _setup_logger() -> logging.Logger:
+    logger = logging.getLogger("main")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        h = logging.StreamHandler()
+        h.setFormatter(logging.Formatter("[%(levelname)s] %(asctime)s - %(message)s", datefmt="%H:%M:%S"))
+        logger.addHandler(h)
+    return logger
+
+
+def _plot_window(
+    context: torch.Tensor,        # [C]
+    target: torch.Tensor,         # [H]
+    chronos_samples: torch.Tensor,  # [S,H]
+    elf_pred: np.ndarray,         # [H]
+    title: str,
+) -> None:
+    ctx = context.detach().cpu().numpy()
+    tgt = target.detach().cpu().numpy()
+    s = chronos_samples.detach().cpu().numpy()  # [S,H]
+
+    q10 = np.quantile(s, 0.10, axis=0)
+    q50 = np.quantile(s, 0.50, axis=0)
+    q90 = np.quantile(s, 0.90, axis=0)
+
+    C = ctx.shape[0]
+    H = tgt.shape[0]
+    x_ctx = np.arange(C)
+    x_fut = np.arange(C, C + H)
+
+    plt.figure()
+    plt.title(title)
+    plt.plot(x_ctx, ctx, label="context")
+    plt.plot(x_fut, tgt, label="target")
+    plt.plot(x_fut, q50, label="chronos median")
+    plt.fill_between(x_fut, q10, q90, alpha=0.2, label="chronos 10-90")
+    plt.plot(x_fut, elf_pred, label="elf fft")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
 
 def main() -> None:
+    logger = _setup_logger()
+    torch.manual_seed(0)
+
     # Dummy data: two series
     T = 600
     t = torch.arange(T, dtype=torch.float32)
@@ -200,8 +245,13 @@ def main() -> None:
     ds = TimeSeriesWindowDataset([s1, s2], spec)
     loader = DataLoader(ds, batch_size=16, shuffle=False, collate_fn=collate_windows)
 
-    # Chronos model id (tiny is easiest on CPU)
+    logger.info(f"Dataset: windows={len(ds)} context_len={spec.context_len} horizon={spec.horizon} stride={spec.stride}")
+
+    # -------------------------
+    # Run Chronos FM
+    # -------------------------
     model_id = "amazon/chronos-t5-tiny"
+    logger.info(f"Chronos: running model_id={model_id}")
 
     out = run_chronos_over_loader(
         model_id=model_id,
@@ -210,9 +260,55 @@ def main() -> None:
         num_samples=128,
     )
 
-    print("samples:", tuple(out["samples"].shape))  # [N,S,H]
-    print("median :", tuple(out["median"].shape))   # [N,H]
-    print("target :", tuple(out["target"].shape))   # [N,H]
+    logger.info(f"Chronos: samples={tuple(out['samples'].shape)}  median={tuple(out['median'].shape)}  target={tuple(out['target'].shape)}")
+
+    # Grab a single window to visualize (dataset order, shuffle=False)
+    batch0 = next(iter(loader))
+    context0 = batch0["context"][0]   # [C]
+    target0 = batch0["target"][0]     # [H]
+    chronos_samples0 = out["samples"][0]  # [S,H]
+
+    # -------------------------
+    # Run ELF FFT lightweight (no weighting)
+    # -------------------------
+
+    elf_cfg = ELFForecasterConfig(
+        L=spec.context_len,
+        H=spec.horizon,
+        alpha=0.9,
+        init_seasonal=True,
+        baseline="last", lam=1e-1
+    )
+    elf = ELFForecaster(elf_cfg, real_dtype=np.float32)
+
+    # Fit ELF on the first K windows (simple warmup)
+    K = 64
+    X = np.stack([ds[i]["context"].numpy() for i in range(min(K, len(ds)))], axis=0)
+    Y = np.stack([ds[i]["target"].numpy() for i in range(min(K, len(ds)))], axis=0)
+
+    logger.info(f"ELF: init alpha={elf_cfg.alpha} lam={elf_cfg.lam} d_x={elf.d_x} d_y={elf.d_y} fit_windows={X.shape[0]}")
+
+    pred_before = elf.predict(context0.numpy())
+    logger.info(f"ELF: pred(before) mean={float(pred_before.mean()):.4f} std={float(pred_before.std()):.4f}")
+
+    t_update = time.time()
+    elf.update_with_batch(X, Y)
+    dt = time.time() - t_update
+    logger.info(f"ELF: update took {dt:.3f}s  avg_per_window={(dt/max(1,X.shape[0]))*1000:.2f}ms  seen={elf.num_windows_seen}")
+
+    pred_after = elf.predict(context0.numpy())
+    logger.info(f"ELF: pred(after) mean={float(pred_after.mean()):.4f} std={float(pred_after.std()):.4f}")
+
+    # -------------------------
+    # Plot Chronos + ELF on same window
+    # -------------------------
+    _plot_window(
+        context=context0,
+        target=target0,
+        chronos_samples=chronos_samples0,
+        elf_pred=pred_after,
+        title="Chronos vs ELF FFT (single window)",
+    )
 
 
 if __name__ == "__main__":
