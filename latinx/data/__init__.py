@@ -1,3 +1,5 @@
 """Data processing and dataset utilities for LatinX."""
 
-__all__ = []
+from latinx.data.ett import ETTLoader
+
+__all__ = ["ETTLoader"]

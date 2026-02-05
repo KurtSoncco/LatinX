@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import time
 from latinx.models.eft_linear_fft import ELFForecaster, ELFForecasterConfig
+from latinx.data.ett import ETTLoader
 
 import matplotlib.pyplot as plt
 # -------------------------
@@ -235,13 +236,24 @@ def main() -> None:
     logger = _setup_logger()
     torch.manual_seed(0)
 
-    # Dummy data: two series
-    T = 600
-    t = torch.arange(T, dtype=torch.float32)
-    s1 = torch.sin(0.02 * t) + 0.05 * torch.randn(T)
-    s2 = torch.cos(0.015 * t + 1.0) + 0.05 * torch.randn(T)
+    # Load ETTm1 dataset (Oil Temperature column)
+    logger.info("Loading ETTm1 dataset...")
+    ett_loader = ETTLoader(dataset="ETTm1", target_column="OT")
+    ett_loader.load()
+    info = ett_loader.info()
+    logger.info(f"ETTm1: total_samples={info['total_samples']} train={info['train_samples']} val={info['val_samples']} test={info['test_samples']}")
 
-    spec = WindowSpec(context_len=256, horizon=24, stride=8)
+    # Get OT (Oil Temperature) series from train split as primary series
+    # Also get HUFL for variety (multiple series)
+    # Limit to first N timesteps for faster iteration
+    max_timesteps = 500  # ~207 windows per series with stride=8, horizon=96
+
+    s1 = ett_loader.get_series("OT", split="train", as_tensor=True)[:max_timesteps]
+    s2 = ett_loader.get_series("HUFL", split="train", as_tensor=True)[:max_timesteps]
+
+    logger.info(f"Series shapes (limited to {max_timesteps}): OT={tuple(s1.shape)} HUFL={tuple(s2.shape)}")
+
+    spec = WindowSpec(context_len=256, horizon=55, stride=8)  # horizon=96 = 24 hours at 15min intervals
     ds = TimeSeriesWindowDataset([s1, s2], spec)
     loader = DataLoader(ds, batch_size=16, shuffle=False, collate_fn=collate_windows)
 
@@ -307,7 +319,7 @@ def main() -> None:
         target=target0,
         chronos_samples=chronos_samples0,
         elf_pred=pred_after,
-        title="Chronos vs ELF FFT (single window)",
+        title="Chronos vs ELF FFT (ETTm1 Oil Temperature)",
     )
 
 
