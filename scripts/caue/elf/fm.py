@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
 import torch
@@ -10,6 +11,9 @@ from latinx.models.eft_linear_fft import ELFForecaster, ELFForecasterConfig
 from latinx.data.ett import ETTLoader
 
 import matplotlib.pyplot as plt
+
+# Output directory for plots
+PLOT_DIR = Path(__file__).parent / "plots"
 # -------------------------
 # Reusable window dataset
 # -------------------------
@@ -206,6 +210,7 @@ def _plot_window(
     chronos_samples: torch.Tensor,  # [S,H]
     elf_pred: np.ndarray,         # [H]
     title: str,
+    save_path: Optional[Path] = None,
 ) -> None:
     ctx = context.detach().cpu().numpy()
     tgt = target.detach().cpu().numpy()
@@ -220,7 +225,7 @@ def _plot_window(
     x_ctx = np.arange(C)
     x_fut = np.arange(C, C + H)
 
-    plt.figure()
+    plt.figure(figsize=(12, 6))
     plt.title(title)
     plt.plot(x_ctx, ctx, label="context")
     plt.plot(x_fut, tgt, label="target")
@@ -229,6 +234,12 @@ def _plot_window(
     plt.plot(x_fut, elf_pred, label="elf fft")
     plt.legend()
     plt.tight_layout()
+
+    if save_path is not None:
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, dpi=150)
+        print(f"Plot saved to {save_path}")
+
     plt.show()
 
 
@@ -314,12 +325,14 @@ def main() -> None:
     # -------------------------
     # Plot Chronos + ELF on same window
     # -------------------------
+    plot_filename = f"chronos_vs_elf_t{max_timesteps}_h{spec.horizon}.png"
     _plot_window(
         context=context0,
         target=target0,
         chronos_samples=chronos_samples0,
         elf_pred=pred_after,
-        title="Chronos vs ELF FFT (ETTm1 Oil Temperature)",
+        title=f"Chronos vs ELF FFT (ETTm1 OT, T={max_timesteps}, H={spec.horizon})",
+        save_path=PLOT_DIR / plot_filename,
     )
 
 
