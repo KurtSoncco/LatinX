@@ -304,11 +304,42 @@ def main() -> None:
 
     logger.info(f"Chronos: samples={tuple(out['samples'].shape)}  median={tuple(out['median'].shape)}  target={tuple(out['target'].shape)}")
 
-    # Grab a single window to visualize (dataset order, shuffle=False)
-    batch0 = next(iter(loader))
-    context0 = batch0["context"][0]   # [C]
-    target0 = batch0["target"][0]     # [H]
-    chronos_samples0 = out["samples"][0]  # [S,H]
+    # -------------------------
+    # Select test window and training windows (no temporal leakage!)
+    # -------------------------
+    # To avoid leakage while testing on the SAME series:
+    # - Test on the LAST window of series 0
+    # - Train on EARLIER windows from series 0
+    #
+    # With stride=8, context_len=256, horizon=55:
+    # - Test window k has: context=[8k : 8k+256], target=[8k+256 : 8k+311]
+    # - Training window j has: context=[8j : 8j+256]
+    # - For no overlap: 8j + 256 <= 8k + 256, i.e., j <= k
+    # - So training on windows 0..(k-1) is safe when testing on window k
+
+    # Count windows per series
+    n_windows_s0 = sum(1 for i in range(len(ds)) if ds[i]["series_id"] == 0)
+    logger.info(f"Windows in series 0 (OT): {n_windows_s0}")
+
+    # Test on last window of series 0, train on earlier windows
+    test_idx = n_windows_s0 - 1  # Last window of series 0
+    train_start = 0
+    train_end = test_idx  # All windows before test window
+
+    # Verify no overlap
+    test_t0 = ds[test_idx]["t0"]
+    last_train_t0 = ds[train_end - 1]["t0"] if train_end > 0 else -1
+    last_train_ctx_end = last_train_t0 + spec.context_len
+    test_target_start = test_t0 + spec.context_len
+    logger.info(f"Last train context ends at t={last_train_ctx_end}, test target starts at t={test_target_start}")
+    assert last_train_ctx_end <= test_target_start, "Temporal leakage detected!"
+
+    # Grab test window
+    context0 = ds[test_idx]["context"]  # [C] tensor
+    target0 = ds[test_idx]["target"]    # [H] tensor
+    chronos_samples0 = out["samples"][test_idx]  # [S,H]
+
+    logger.info(f"Test window idx={test_idx} (t0={test_t0}), Training windows [0, {train_end}) from same series")
 
     # -------------------------
     # Run ELF FFT lightweight (no weighting)
@@ -323,12 +354,11 @@ def main() -> None:
     )
     elf = ELFForecaster(elf_cfg, real_dtype=np.float32)
 
-    # Fit ELF on the first K windows (simple warmup)
-    K = 64
-    X = np.stack([ds[i]["context"].numpy() for i in range(min(K, len(ds)))], axis=0)
-    Y = np.stack([ds[i]["target"].numpy() for i in range(min(K, len(ds)))], axis=0)
+    # Fit ELF on windows [train_start, train_end) - all from series 0, no overlap with test
+    X = np.stack([ds[i]["context"].numpy() for i in range(train_start, train_end)], axis=0)
+    Y = np.stack([ds[i]["target"].numpy() for i in range(train_start, train_end)], axis=0)
 
-    logger.info(f"ELF: init alpha={elf_cfg.alpha} lam={elf_cfg.lam} d_x={elf.d_x} d_y={elf.d_y} fit_windows={X.shape[0]}")
+    logger.info(f"ELF: init alpha={elf_cfg.alpha} lam={elf_cfg.lam} d_x={elf.d_x} d_y={elf.d_y} train_windows={X.shape[0]}")
 
     pred_before = elf.predict(context0.numpy())
     logger.info(f"ELF: pred(before) mean={float(pred_before.mean()):.4f} std={float(pred_before.std()):.4f}")
@@ -349,13 +379,14 @@ def main() -> None:
         L=spec.context_len,
         H=spec.horizon,
         alpha_freq=0.9,
-        alpha_prior=0.01,
+        prior_precision=1.0,  # P_0 = I (moderate prior)
         sigma=0.1,
         baseline="last",
+        init_seasonal=True,
     )
     bfft = BayesianFFTAdapter(bfft_cfg, real_dtype=np.float32)
 
-    logger.info(f"BFFT: init alpha_freq={bfft_cfg.alpha_freq} alpha_prior={bfft_cfg.alpha_prior} sigma={bfft_cfg.sigma} d_x={bfft.d_x} d_y={bfft.d_y}")
+    logger.info(f"BFFT: init alpha_freq={bfft_cfg.alpha_freq} prior_precision={bfft_cfg.prior_precision} sigma={bfft_cfg.sigma} d_x={bfft.d_x} d_y={bfft.d_y}")
 
     # Predict before training (prior)
     bfft_pred_before = bfft.predict(context0.numpy())

@@ -10,7 +10,7 @@ Key ideas:
 1. FFT preprocessing: same as ELF (context FFT → crop → predict target spectrum)
 2. Complex-to-Real conversion: stack real/imaginary parts to use standard BLR
 3. Online updates: Kalman filter equations for sequential posterior refinement
-4. Uncertainty: sample from posterior, propagate through IRFFT for time-domain bands
+4. Uncertainty: sample from posterior + observation noise, propagate through IRFFT
 """
 
 from __future__ import annotations
@@ -58,17 +58,20 @@ class BayesianFFTAdapterConfig:
         L: Context length (input window size)
         H: Horizon length (prediction window size)
         alpha_freq: Frequency cropping parameter (same as ELF's alpha)
-        alpha_prior: Prior precision (regularization strength, higher = stronger prior)
-        sigma: Observation noise standard deviation
+        prior_precision: Prior precision on weights (higher = stronger regularization).
+            Default 1.0 gives P_0 = I. Use smaller values (e.g., 0.01) for weaker prior.
+        sigma: Observation noise standard deviation in spectrum space
         baseline: Baseline type for detrending ("last" or "mean")
+        init_seasonal: If True, initialize posterior mean with seasonal-ish pattern
         jitter: Small constant for numerical stability
     """
     L: int
     H: int
     alpha_freq: float = 0.9
-    alpha_prior: float = 0.01
+    prior_precision: float = 1.0
     sigma: float = 0.1
     baseline: str = "last"
+    init_seasonal: bool = True
     jitter: float = 1e-6
 
 
@@ -83,7 +86,7 @@ class BayesianFFTAdapter:
     Approach: Shared covariance across output frequencies (Approach 3A).
 
     Mathematical formulation:
-        Prior: Theta ~ N(0, (1/alpha_prior) * I)
+        Prior: Theta ~ N(0, (1/prior_precision) * I)
         Likelihood: Y_big | Theta, A_big ~ N(A_big @ Theta, sigma^2 * I)
         Posterior: Theta | data ~ N(M, P)
 
@@ -112,14 +115,33 @@ class BayesianFFTAdapter:
         # For output: stack [real; imag] -> 2 * d_y per window row
         self.dim_theta = 2 * self.d_x  # Parameter dimension
 
-        # Initialize posterior: M = 0, P = (1/alpha_prior) * I
+        # Initialize posterior: M = 0 (or seasonal), P = (1/prior_precision) * I
         self.M = np.zeros((self.dim_theta, self.d_y), dtype=self.real_dtype)
-        self.P = (1.0 / cfg.alpha_prior) * np.eye(self.dim_theta, dtype=self.real_dtype)
+        self.P = (1.0 / cfg.prior_precision) * np.eye(self.dim_theta, dtype=self.real_dtype)
+
+        if cfg.init_seasonal:
+            self._init_weights_seasonal()
 
         # Observation variance
         self.sigma_sq = cfg.sigma ** 2
 
         self.num_windows_seen = 0
+        self._update_count = 0  # Track updates for occasional checks
+
+    def _init_weights_seasonal(self) -> None:
+        """
+        Initialize posterior mean with seasonal-ish pattern.
+
+        Sets W ≈ I on overlapping input/output frequency bins.
+        This gives a stable starting point: predict same frequencies as input.
+
+        In real parameterization: U = I (on overlap), V = 0
+        """
+        k = min(self.d_x, self.d_y)
+        # U is in M[:d_x, :], set diagonal to 1
+        for i in range(k):
+            self.M[i, i] = 1.0
+        # V (in M[d_x:, :]) stays zero
 
     def _baseline_value(self, x: np.ndarray) -> np.ndarray:
         """Compute baseline value for detrending (same as ELF)."""
@@ -221,15 +243,37 @@ class BayesianFFTAdapter:
 
         return Y_big
 
-    def _reconstruct_W(self) -> np.ndarray:
+    def _safe_cholesky(self, P: np.ndarray) -> np.ndarray:
         """
-        Reconstruct complex W matrix from real posterior mean M.
+        Compute Cholesky decomposition with eigenvalue clipping fallback.
 
-        M has shape [2*d_x, d_y] = [[U], [V]]
-        W = U + iV has shape [d_x, d_y]
+        If P is not positive definite, clips negative eigenvalues and reconstructs.
         """
-        U = self.M[:self.d_x, :]  # [d_x, d_y]
-        V = self.M[self.d_x:, :]  # [d_x, d_y]
+        try:
+            return np.linalg.cholesky(P)
+        except np.linalg.LinAlgError:
+            # Eigenvalue clipping: ensure all eigenvalues are >= min_eig
+            min_eig = 1e-6
+            eigvals, eigvecs = np.linalg.eigh(P)
+            eigvals_clipped = np.maximum(eigvals, min_eig)
+            P_fixed = eigvecs @ np.diag(eigvals_clipped) @ eigvecs.T
+            P_fixed = 0.5 * (P_fixed + P_fixed.T)  # Ensure symmetry
+            return np.linalg.cholesky(P_fixed)
+
+    def _reconstruct_W(self, Theta: Optional[np.ndarray] = None) -> np.ndarray:
+        """
+        Reconstruct complex W matrix from real parameterization.
+
+        Theta has shape [2*d_x, d_y] = [[U], [V]]
+        W = U + iV has shape [d_x, d_y]
+
+        Args:
+            Theta: Real parameter matrix. If None, uses posterior mean M.
+        """
+        if Theta is None:
+            Theta = self.M
+        U = Theta[:self.d_x, :]  # [d_x, d_y]
+        V = Theta[self.d_x:, :]  # [d_x, d_y]
         return (U + 1j * V).astype(self.cdtype)
 
     def update_with_batch(self, X_ctx: np.ndarray, Y_true: np.ndarray) -> None:
@@ -292,18 +336,20 @@ class BayesianFFTAdapter:
         # Mean update: M <- M + K @ innovation
         self.M = self.M + K @ innovation
 
-        # Covariance update: P <- P - K @ A @ P
-        self.P = self.P - K @ AP
+        # Covariance update using Joseph form (more numerically stable):
+        # P <- (I - K @ A) @ P @ (I - K @ A)^T + K @ R @ K^T
+        # where R = sigma^2 * I
+        I_KA = np.eye(self.dim_theta, dtype=self.real_dtype) - K @ A_big
+        self.P = I_KA @ self.P @ I_KA.T + self.sigma_sq * (K @ K.T)
 
         # Symmetrize for numerical stability
         self.P = 0.5 * (self.P + self.P.T)
 
-        # Ensure positive definiteness by adding jitter to diagonal if needed
-        min_eig = np.linalg.eigvalsh(self.P).min()
-        if min_eig < self.cfg.jitter:
-            self.P += (self.cfg.jitter - min_eig + 1e-8) * np.eye(self.dim_theta, dtype=self.real_dtype)
+        # Add small diagonal jitter unconditionally
+        self.P += self.cfg.jitter * np.eye(self.dim_theta, dtype=self.real_dtype)
 
         self.num_windows_seen += M_windows
+        self._update_count += 1
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         """
@@ -323,6 +369,9 @@ class BayesianFFTAdapter:
 
         y_spec_crop = x_feat @ W  # [d_y] complex
 
+        # Clamp DC bin imaginary part to zero (DC should be real for RFFT)
+        y_spec_crop[0] = y_spec_crop[0].real + 0j
+
         # Zero-pad and inverse transform
         y_spec_full = np.zeros((self.Hr,), dtype=self.cdtype)
         y_spec_full[: self.d_y] = y_spec_crop
@@ -335,16 +384,23 @@ class BayesianFFTAdapter:
         x: np.ndarray,
         num_samples: int = 100,
         rng: Optional[np.random.Generator] = None,
+        include_obs_noise: bool = True,
     ) -> np.ndarray:
         """
-        Sample forecasts from the posterior distribution.
+        Sample forecasts from the predictive distribution.
 
-        Samples Theta ~ N(M, P), reconstructs W, and propagates through IRFFT.
+        Samples Theta ~ N(M, P), reconstructs W, adds observation noise in
+        spectrum space, and propagates through IRFFT.
+
+        The predictive distribution includes both:
+        1. Parameter uncertainty (from posterior P)
+        2. Observation noise (sigma in spectrum space)
 
         Args:
             x: Context window of shape [L]
             num_samples: Number of Monte Carlo samples
             rng: Random number generator (optional)
+            include_obs_noise: If True, add observation noise to spectrum
 
         Returns:
             Forecast samples of shape [num_samples, H]
@@ -356,17 +412,12 @@ class BayesianFFTAdapter:
         base = self._baseline_value(x)
         x_feat = self._x_to_features(x, base=base)  # [d_x] complex
 
-        # Sample from posterior
-        # Theta ~ N(M, P) -> Theta has shape [2*d_x, d_y]
-        # We sample each output column independently (shared covariance)
-        try:
-            L_chol = np.linalg.cholesky(self.P)  # [2*d_x, 2*d_x]
-        except np.linalg.LinAlgError:
-            # Fallback: add jitter and retry
-            P_stable = self.P + 1e-4 * np.eye(self.dim_theta, dtype=self.real_dtype)
-            L_chol = np.linalg.cholesky(P_stable)
+        # Cholesky of posterior covariance for sampling
+        # Use eigenvalue clipping for robustness
+        L_chol = self._safe_cholesky(self.P)
 
         forecasts = np.empty((num_samples, self.cfg.H), dtype=self.real_dtype)
+        sigma = self.cfg.sigma
 
         for s in range(num_samples):
             # Sample: Theta = M + L @ z where z ~ N(0, I)
@@ -374,12 +425,23 @@ class BayesianFFTAdapter:
             Theta_sample = self.M + L_chol @ z  # [2*d_x, d_y]
 
             # Reconstruct complex W from sampled Theta
-            U = Theta_sample[:self.d_x, :]
-            V = Theta_sample[self.d_x:, :]
-            W_sample = (U + 1j * V).astype(self.cdtype)  # [d_x, d_y]
+            W_sample = self._reconstruct_W(Theta_sample)  # [d_x, d_y]
 
-            # Forward pass
+            # Forward pass: y_spec = x_feat @ W
             y_spec_crop = x_feat @ W_sample  # [d_y] complex
+
+            # Add observation noise in spectrum space
+            # For complex noise with variance sigma^2: real and imag each have variance sigma^2/2
+            if include_obs_noise and sigma > 0:
+                noise_real = rng.standard_normal(self.d_y).astype(self.real_dtype)
+                noise_imag = rng.standard_normal(self.d_y).astype(self.real_dtype)
+                # Complex noise: (sigma/sqrt(2)) * (n_r + i*n_i) has |noise|^2 ~ sigma^2
+                y_spec_crop = y_spec_crop + (sigma / np.sqrt(2)) * (noise_real + 1j * noise_imag)
+
+            # Clamp DC bin imaginary part to zero
+            y_spec_crop[0] = y_spec_crop[0].real + 0j
+
+            # Zero-pad and inverse transform
             y_spec_full = np.zeros((self.Hr,), dtype=self.cdtype)
             y_spec_full[: self.d_y] = y_spec_crop
 
@@ -394,6 +456,7 @@ class BayesianFFTAdapter:
         quantiles: Tuple[float, ...] = (0.1, 0.5, 0.9),
         num_samples: int = 100,
         rng: Optional[np.random.Generator] = None,
+        include_obs_noise: bool = True,
     ) -> dict:
         """
         Compute forecast quantiles via Monte Carlo sampling.
@@ -403,12 +466,15 @@ class BayesianFFTAdapter:
             quantiles: Tuple of quantile levels (e.g., (0.1, 0.5, 0.9))
             num_samples: Number of Monte Carlo samples
             rng: Random number generator (optional)
+            include_obs_noise: If True, include observation noise in samples
 
         Returns:
             Dictionary with keys like 'q10', 'q50', 'q90' containing
             numpy arrays of shape [H]
         """
-        samples = self.sample_forecasts(x, num_samples=num_samples, rng=rng)
+        samples = self.sample_forecasts(
+            x, num_samples=num_samples, rng=rng, include_obs_noise=include_obs_noise
+        )
 
         result = {}
         for q in quantiles:
@@ -425,10 +491,17 @@ class BayesianFFTAdapter:
             Dictionary with posterior statistics
         """
         W = self._reconstruct_W()
+
+        # Only compute expensive eigvalsh occasionally or on demand
+        try:
+            min_eig = float(np.linalg.eigvalsh(self.P).min())
+        except np.linalg.LinAlgError:
+            min_eig = float('nan')
+
         return {
             "posterior_mean_norm": float(np.linalg.norm(self.M)),
             "posterior_cov_trace": float(np.trace(self.P)),
-            "posterior_cov_min_eig": float(np.linalg.eigvalsh(self.P).min()),
+            "posterior_cov_min_eig": min_eig,
             "W_mean_abs": float(np.abs(W).mean()),
             "num_windows_seen": self.num_windows_seen,
         }
