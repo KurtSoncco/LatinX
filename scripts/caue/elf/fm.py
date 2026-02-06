@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import time
 from latinx.models.eft_linear_fft import ELFForecaster, ELFForecasterConfig
+from latinx.models.bayesian_fft_adapter import BayesianFFTAdapter, BayesianFFTAdapterConfig
 from latinx.data.ett import ETTLoader
 
 import matplotlib.pyplot as plt
@@ -209,7 +210,8 @@ def _plot_window(
     target: torch.Tensor,         # [H]
     chronos_samples: torch.Tensor,  # [S,H]
     elf_pred: np.ndarray,         # [H]
-    title: str,
+    bfft_quantiles: Optional[Dict[str, np.ndarray]] = None,  # {"q10": [H], "q50": [H], "q90": [H]}
+    title: str = "",
     save_path: Optional[Path] = None,
 ) -> None:
     ctx = context.detach().cpu().numpy()
@@ -225,14 +227,31 @@ def _plot_window(
     x_ctx = np.arange(C)
     x_fut = np.arange(C, C + H)
 
-    plt.figure(figsize=(12, 6))
+    plt.figure(figsize=(14, 7))
     plt.title(title)
-    plt.plot(x_ctx, ctx, label="context")
-    plt.plot(x_fut, tgt, label="target")
-    plt.plot(x_fut, q50, label="chronos median")
-    plt.fill_between(x_fut, q10, q90, alpha=0.2, label="chronos 10-90")
-    plt.plot(x_fut, elf_pred, label="elf fft")
-    plt.legend()
+    plt.plot(x_ctx, ctx, label="context", color="gray")
+    plt.plot(x_fut, tgt, label="target", color="black", linewidth=2)
+
+    # Chronos
+    plt.plot(x_fut, q50, label="chronos median", color="blue")
+    plt.fill_between(x_fut, q10, q90, alpha=0.2, color="blue", label="chronos 10-90")
+
+    # ELF
+    plt.plot(x_fut, elf_pred, label="elf fft", color="green", linestyle="--")
+
+    # Bayesian FFT Adapter
+    if bfft_quantiles is not None:
+        bfft_q50 = bfft_quantiles.get("q50", None)
+        bfft_q10 = bfft_quantiles.get("q10", None)
+        bfft_q90 = bfft_quantiles.get("q90", None)
+        if bfft_q50 is not None:
+            plt.plot(x_fut, bfft_q50, label="bfft median", color="red", linestyle="-.")
+        if bfft_q10 is not None and bfft_q90 is not None:
+            plt.fill_between(x_fut, bfft_q10, bfft_q90, alpha=0.2, color="red", label="bfft 10-90")
+
+    plt.legend(loc="upper left")
+    plt.xlabel("Time")
+    plt.ylabel("Value")
     plt.tight_layout()
 
     if save_path is not None:
@@ -323,15 +342,55 @@ def main() -> None:
     logger.info(f"ELF: pred(after) mean={float(pred_after.mean()):.4f} std={float(pred_after.std()):.4f}")
 
     # -------------------------
-    # Plot Chronos + ELF on same window
+    # Run Bayesian FFT Adapter
     # -------------------------
-    plot_filename = f"chronos_vs_elf_t{max_timesteps}_h{spec.horizon}.png"
+
+    bfft_cfg = BayesianFFTAdapterConfig(
+        L=spec.context_len,
+        H=spec.horizon,
+        alpha_freq=0.9,
+        alpha_prior=0.01,
+        sigma=0.1,
+        baseline="last",
+    )
+    bfft = BayesianFFTAdapter(bfft_cfg, real_dtype=np.float32)
+
+    logger.info(f"BFFT: init alpha_freq={bfft_cfg.alpha_freq} alpha_prior={bfft_cfg.alpha_prior} sigma={bfft_cfg.sigma} d_x={bfft.d_x} d_y={bfft.d_y}")
+
+    # Predict before training (prior)
+    bfft_pred_before = bfft.predict(context0.numpy())
+    logger.info(f"BFFT: pred(before) mean={float(bfft_pred_before.mean()):.4f} std={float(bfft_pred_before.std()):.4f}")
+
+    # Train on same K windows as ELF
+    t_bfft_update = time.time()
+    bfft.update_with_batch(X, Y)
+    dt_bfft = time.time() - t_bfft_update
+    logger.info(f"BFFT: update took {dt_bfft:.3f}s  avg_per_window={(dt_bfft/max(1,X.shape[0]))*1000:.2f}ms  seen={bfft.num_windows_seen}")
+
+    # Point prediction
+    bfft_pred_after = bfft.predict(context0.numpy())
+    logger.info(f"BFFT: pred(after) mean={float(bfft_pred_after.mean()):.4f} std={float(bfft_pred_after.std()):.4f}")
+
+    # Get uncertainty quantiles
+    rng = np.random.default_rng(42)
+    bfft_quantiles = bfft.get_quantiles(context0.numpy(), quantiles=(0.1, 0.5, 0.9), num_samples=200, rng=rng)
+    logger.info(f"BFFT: quantiles computed (q10, q50, q90)")
+
+    # Log posterior stats
+    stats = bfft.get_posterior_stats()
+    logger.info(f"BFFT: posterior_mean_norm={stats['posterior_mean_norm']:.4f} cov_trace={stats['posterior_cov_trace']:.4f} min_eig={stats['posterior_cov_min_eig']:.6f}")
+
+    # -------------------------
+    # Plot Chronos + ELF + BFFT on same window
+    # -------------------------
+    plot_filename = f"chronos_vs_elf_vs_bfft_t{max_timesteps}_h{spec.horizon}.png"
     _plot_window(
         context=context0,
         target=target0,
         chronos_samples=chronos_samples0,
         elf_pred=pred_after,
-        title=f"Chronos vs ELF FFT (ETTm1 OT, T={max_timesteps}, H={spec.horizon})",
+        bfft_quantiles=bfft_quantiles,
+        title=f"Chronos vs ELF vs Bayesian FFT (ETTm1 OT, T={max_timesteps}, H={spec.horizon})",
         save_path=PLOT_DIR / plot_filename,
     )
 
