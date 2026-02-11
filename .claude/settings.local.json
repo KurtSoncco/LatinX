@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c:*)",
+      "Bash(source:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python3:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:arxiv.org)",
+      "Bash(python -m pytest:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(pyenv versions:*)",
+      "Bash(PYENV_VERSION=3.12.6 python -m pytest:*)"
+    ]
+  }
+}
